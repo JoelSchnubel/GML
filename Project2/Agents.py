@@ -3,20 +3,11 @@ import random
 import numpy as np
 from collections import deque
 from enum import Enum
-from models import Linear_QNet, QTrainer
+from models import Linear_QNet, QTrainer, LSTM_QNET
 
 MAX_MEMORY = 100_000
-BATCH_SIZE = 1000
+BATCH_SIZE = 128
 LR = 0.015
-
-class Direction(Enum):
-    RIGHT = 1
-    LEFT = 2
-    UP = 3
-    DOWN = 4
-    
-
-
 
 class Solo_Q_Agent():
     def __init__(self, pos ,perception_radius):
@@ -28,12 +19,13 @@ class Solo_Q_Agent():
         self.epsilon = 0 # randomness
         self.gamma = 0.9 # discount rate
         self.memory = deque(maxlen=MAX_MEMORY) # popleft()
-        self.model = Linear_QNet((2*self.perception_radius+1)**2, 256, 4)
+        #self.model = Linear_QNet((2*self.perception_radius+1)**2, 256, 4)
+        self.model = LSTM_QNET(3,128,1,4)
         self.trainer = QTrainer(self.model, lr=LR, gamma=self.gamma)
 
 
-    def remember(self, state, action, reward, next_state, done):
-        self.memory.append((state, action, reward, next_state, done)) # popleft if MAX_MEMORY is reached
+    def remember(self, state, action, reward, next_state,done):
+        self.memory.append((state, action, reward, next_state,done)) # popleft if MAX_MEMORY is reached
     
     def train_long_memory(self):
         if len(self.memory) > BATCH_SIZE:
@@ -41,13 +33,13 @@ class Solo_Q_Agent():
         else:
             mini_sample = self.memory
 
-        states, actions, rewards, next_states, dones = zip(*mini_sample)
-        self.trainer.train_step(states, actions, rewards, next_states, dones)
-        #for state, action, reward, nexrt_state, done in mini_sample:
-        #    self.trainer.train_step(state, action, reward, next_state, done)
+        states, actions, rewards, next_states ,dones = zip(*mini_sample)
+        self.trainer.train_step(states, actions, rewards, next_states,dones,True)
+        #for state, action, reward, nexrt_state in mini_sample:
+        #    self.trainer.train_step(state, action, reward, next_state,done)
 
-    def train_short_memory(self, state, action, reward, next_state, done):
-        self.trainer.train_step(state, action, reward, next_state, done)
+    def train_short_memory(self, state, action, reward, next_state,done):
+        self.trainer.train_step(state, action, reward, next_state,done,False)
 
     def get_action(self, state):
         # random moves: tradeoff exploration / exploitation
@@ -64,6 +56,8 @@ class Solo_Q_Agent():
 
         return final_move
     
+    
+    
    
 
 
@@ -72,6 +66,40 @@ class Solo_Q_Agent_Rabbit(Solo_Q_Agent):
     
     def __init__(self, pos, perception_radius):
         super().__init__(pos, perception_radius)
+        
+    def get_lstm_state(self,world):
+        x,y = self.pos
+        state = [[x,y,5]]
+        
+
+        #fox = -100
+        for fox in world.foxes:
+            distance = np.linalg.norm(np.array(self.pos)-np.array(fox.pos))
+            if distance <= self.perception_radius:
+                state.append([fox.pos[0],fox.pos[1],-100])
+        
+        #rabbit = 1
+        for rabbit in world.rabbits:
+            distance = np.linalg.norm(np.array(self.pos)-np.array(rabbit.pos))
+            if distance <= self.perception_radius:
+                state.append([rabbit.pos[0],rabbit.pos[1],1])
+            
+        #carrot = 10
+        for carrot in world.carrots:
+            distance = np.linalg.norm(np.array(self.pos)-np.array(carrot))
+            if distance <= self.perception_radius:
+                state.append([carrot[0],carrot[1],10])
+        
+        #rock = -1
+        for rock in world.rocks:
+            distance = np.linalg.norm(np.array(self.pos)-np.array(rock))
+            if distance <= self.perception_radius:
+                state.append([rock[0],rock[1],-1])
+        
+        
+        return np.array(state)
+        
+    
     
     def get_state(self, world):
         agent_x, agent_y = self.pos
@@ -129,6 +157,36 @@ class Solo_Q_Agent_Fox(Solo_Q_Agent):
     
     def __init__(self, pos, perception_radius):
         super().__init__(pos, perception_radius)
+        
+    def get_lstm_state(self,world):
+        x,y = self.pos
+        state = [[x,y,5]]
+        
+        #fox = 1
+        for fox in world.foxes:
+            distance = np.linalg.norm(np.array(self.pos)-np.array(fox.pos))
+            if distance <= self.perception_radius:
+                state.append([fox.pos[0],fox.pos[1],1])
+        
+        #rabbit = 100
+        for rabbit in world.rabbits:
+            distance = np.linalg.norm(np.array(self.pos)-np.array(rabbit.pos))
+            if distance <= self.perception_radius:
+                state.append([rabbit.pos[0],rabbit.pos[1],100])
+            
+        #carrot = 0
+        for carrot in world.carrots:
+            distance = np.linalg.norm(np.array(self.pos)-np.array(carrot))
+            if distance <= self.perception_radius:
+                state.append([carrot[0],carrot[1],0])
+        
+        #rock = -1
+        for rock in world.rocks:
+            distance = np.linalg.norm(np.array(self.pos)-np.array(rock))
+            if distance <= self.perception_radius:
+                state.append([rock[0],rock[1],-1])
+        
+        return np.array(state)
     
     def get_state(self, world):
         agent_x, agent_y = self.pos
