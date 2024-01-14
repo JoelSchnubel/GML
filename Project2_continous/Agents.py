@@ -1,9 +1,10 @@
 import random
 import numpy as np
 from collections import deque
-from models import Policy_Network, QTrainer
+from models import Policy_Network, QTrainer ,Critic
 import math
 import torch
+import torch.optim as optim
 
 MAX_MEMORY = 100_000
 BATCH_SIZE = 1024
@@ -40,8 +41,15 @@ class Agent():
         self.goal = torch.zeros(goal_size,dtype=float)
         self.com  = torch.zeros(communication_size,dtype=float)
 
-        self.model = Policy_Network(communication_size,num_communication_streams ,state_size,action_space_size, goal_size,memory_size)
-        self.trainer = QTrainer(self.model, lr=LR, gamma=self.gamma)
+        self.model = Policy_Network(communication_size,num_communication_streams ,state_size,action_space_size, goal_size,memory_size,hidden_size=256)
+        self.critic = Critic(state_size=state_size,num_objects=9,action_size=action_space_size,hidden_dim=256)
+        
+        #self.trainer = QTrainer(self.model, self.critic,lr=LR, gamma=self.gamma)
+        
+        # Define the optimizers
+        self.actor_optimizer = optim.Adam(self.model.parameters(), lr=LR)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=LR)
+        
 
     def remember(self, state, action, reward, next_state,communication_streams):
         self.memory.append((state, action, reward, next_state,communication_streams,self.goal)) # popleft if MAX_MEMORY is reached
@@ -127,7 +135,7 @@ class Agent():
         
         return torch.tensor(state,dtype=float)
     
-    def get_action_communication(self, communication_streams, physical_observations):
+    def get_action_communication(self, physical_observations,communication_streams,goal):
         self.epsilon = 80 - self.n_games
         
         
@@ -145,7 +153,7 @@ class Agent():
         else:
             # pred = theta,velocity
             
-            prediction , communication = self.model(communication_streams, physical_observations,self.goal)
+            prediction , communication = self.model(physical_observations,communication_streams,goal)
             
             prediction = prediction.detach().numpy()
             

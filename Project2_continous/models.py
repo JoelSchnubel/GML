@@ -8,7 +8,7 @@ import torch.distributions as dists
 
 
 class Policy_Network(nn.Module):
-    def __init__(self,communication_size,num_communication_streams ,state_size,action_space_size, goal_size,memory_size):
+    def __init__(self,communication_size,num_communication_streams ,state_size,action_space_size, goal_size,memory_size,hidden_size=256):
         super(Policy_Network, self).__init__()
         self.memory_size = memory_size
         self.action_space_size = action_space_size
@@ -24,20 +24,20 @@ class Policy_Network(nn.Module):
         
             
         self.shared_communication_module = nn.Sequential(
-            nn.Linear(communication_size+memory_size, 256,dtype=float),
+            nn.Linear(communication_size+memory_size, hidden_size,dtype=float),
             nn.ReLU(),
             nn.Dropout(p=0.1),
-            nn.Linear(256, 256+memory_size,dtype=float),
+            nn.Linear(hidden_size, hidden_size+memory_size,dtype=float),
             nn.ReLU(),
             nn.Dropout(p=0.1)
         )
         
         # Define the shared fully-connected processing module for pyhisical observation
         self.shared_pyhisical_observation_module = nn.Sequential(
-            nn.Linear(state_size, 256,dtype=float),
+            nn.Linear(state_size, hidden_size,dtype=float),
             nn.ReLU(),
             nn.Dropout(p=0.1),
-            nn.Linear(256, 256,dtype=float),
+            nn.Linear(hidden_size, hidden_size,dtype=float),
             nn.ReLU(),
             nn.Dropout(p=0.1)
         )
@@ -47,19 +47,15 @@ class Policy_Network(nn.Module):
 
         self.final_memory = torch.zeros(memory_size,dtype=float)
         self.final_layer = nn.Sequential(
-            nn.Linear(512+goal_size + memory_size, 256,dtype=float),
+            nn.Linear(2*hidden_size+goal_size + memory_size, hidden_size,dtype=float),
             nn.ReLU(),
             nn.Dropout(p=0.1),
-            # 2 for 2 actions
-            nn.Linear(256, action_space_size+communication_size+memory_size,dtype=float),
+            nn.Linear(hidden_size, action_space_size+communication_size+memory_size,dtype=float),
         )
         
         
-
-        
-    def forward(self, communication_streams, physical_observations, private_goal):
-        
-        
+  
+    def forward(self, physical_observations,communication_streams, private_goal):
         
         # Process communication streams
         #communication_features = []
@@ -149,52 +145,47 @@ class Policy_Network(nn.Module):
 
 
 
+class Critic(nn.Module):
+    def __init__(self, state_size,num_objects, action_size, hidden_dim):
+        super(Critic, self).__init__()
 
+        self.network = nn.Sequential(
+            nn.Linear(state_size*num_objects+action_size, hidden_dim,dtype=float),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 1,dtype=float)
+        )
+
+    def forward(self, state, action):
+        x = torch.cat((state.view(-1), action))
+        x = self.network(x)
+        return x
+    
+    
 
 class QTrainer:
-    def __init__(self, model, lr, gamma):
+    def __init__(self, model,critic, lr, gamma):
         self.lr = lr
         self.gamma = gamma
         self.model = model
+        self.critic = critic
         self.optimizer = optim.Adam(model.parameters(), lr=self.lr)
         self.criterion = nn.MSELoss()
 
-   
-    def train_step(self, state, action, reward, next_state,communication_streams,private_goal):
-
-            pass
+    
+    
+    def train_step(self, state, action, reward, next_state,communication_streams,private_goal,world):
         
-            #state = torch.tensor(state, dtype=torch.float)
-            #next_state = torch.tensor(next_state, dtype=torch.float)
-            #action = torch.tensor(action, dtype=torch.long)
-            #reward = torch.tensor(reward, dtype=torch.float)
+        
+        critics = [p.critic for p in world.prey] + [p.critic for p in world.predator]
+        prey_models = [p.model for p in world.prey]
+        pred_models = [p.model for p in world.predator]
+        prey_goals = [p.goal for p in world.prey] 
+        preadotr_goals =[p.goal for p in world.predator]
             
-                
 
-
-            # 1: predicted Q values with current state
-            #action , communication = self.model(communication_streams,state,private_goal)
-            
-                
-            #target = pred.clone()
-            #for idx in range(len(done)):
-                
-            #    Q_new = reward[idx].item() + self.gamma * torch.max(self.model(next_state[idx])).item()
-                
-
-            #   target[idx][torch.argmax(action[idx]).item()] = Q_new
-          
-            # 2: Q_new = r + y * max(next_predicted Q value) -> only do this if not done
-            # pred.clone()
-            # preds[argmax(action)] = Q_new
-            #self.optimizer.zero_grad()
-            #loss = self.criterion(target, pred)
-            #loss.backward()
-
-            #self.optimizer.step()
-
-
-
+        
+      
+  
 
 # Create an instance of the PolicyNetwork class
 #action_space_size = 2
