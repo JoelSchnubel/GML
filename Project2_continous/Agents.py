@@ -1,7 +1,7 @@
 import random
 import numpy as np
 from collections import deque
-from models import Policy_Network, QTrainer ,Critic
+from models import Policy_Network ,Critic
 import math
 import torch
 import torch.optim as optim
@@ -21,6 +21,21 @@ def check_range(x,y,r, other_x,other_y,other_r):
     distance_to_landmark = math.sqrt((x - other_x)**2 + (y - other_y)**2)
     combined_radius = r + other_r
     return int(distance_to_landmark <= combined_radius)
+
+def adjust_position(agent_pos, agent_radius, landmark_pos, landmark_radius):
+    collision_vector = (agent_pos[0] - landmark_pos[0], agent_pos[1] - landmark_pos[1])
+    collision_distance = agent_radius + landmark_radius
+    collision_magnitude = math.sqrt(collision_vector[0]**2 + collision_vector[1]**2)
+
+    # Normalize the collision vector
+    normalized_collision_vector = (collision_vector[0] / collision_magnitude, collision_vector[1] / collision_magnitude)
+
+    # Move the agent away from the landmark along the collision vector
+    new_x = landmark_pos[0] + normalized_collision_vector[0] * collision_distance
+    new_y = landmark_pos[1] + normalized_collision_vector[1] * collision_distance
+    
+
+    return new_x,new_y
     
 
 class Agent():
@@ -175,7 +190,11 @@ class Agent():
         new_x = max(self.size,min(new_x,SCREEN_WIDTH-self.size))
         new_y = max(self.size,min(new_y,SCREEN_HEIGHT-self.size))
         
-        
+        #make sure it is not in a landmark
+        for landmark in world.landmarks[world.current]:
+            if check_range(self.pos[0],self.pos[1],self.size,landmark[0],landmark[1],LANDMARK_RADIUS):
+                new_x,new_y = adjust_position(self.pos,self.size,landmark,LANDMARK_RADIUS)
+                
         
         self.pos = [new_x,new_y]
         

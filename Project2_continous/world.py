@@ -1,10 +1,11 @@
 import pygame
 import random
 from Agents import Prey,Predator
-import numpy as np
+import math
 import torch
 from collections import deque
 import torch.nn.functional as F
+import pickle
 # Initialize Pygame
 pygame.init()
 
@@ -21,7 +22,11 @@ SCREEN_HEIGHT = 800
 LANDMARK_RADIUS = 30
 MAX_MEMORY = 100_000
 
-torch.autograd.set_detect_anomaly(True)
+def update_file(file_path,value):
+    with open (file_path,'a') as f:
+        f.write(str(value) + '\n')
+
+#torch.autograd.set_detect_anomaly(True)
 class Game:
     def __init__(self,width,height,prey=[],predator=[]):
         self.width = width
@@ -34,6 +39,9 @@ class Game:
         self.predator_coms = []
         self.prey_coms = []
         self.memory = deque(maxlen=MAX_MEMORY) # popleft()
+        
+        self.best_prey_score = -math.inf
+        self.best_predator_score = -math.inf
        
         
     def create_landmarks(self,seed,num_worlds,num_landmarks):
@@ -60,8 +68,8 @@ class Game:
         #next_staes : (state,coms,goal)
         self.memory.append((prey_states,prey_actions,prey_rewards,prey_next_states,predator_states,predator_actions,predator_rewards,predator_next_states))
         
-    def train(self,gamma=0.95,batch_size=32):
-        
+    def train_critics(self,gamma=0.95,batch_size=32):
+        print('training critics ...')
         
         #update all preys
         for i,p in enumerate(self.prey):
@@ -95,30 +103,146 @@ class Game:
             # calc target vector y as min of critcs
             #target = torch.tensor(prey_rewards[i-1]) + gamma * torch.min(torch.cat(own_next_criric),torch.cat(next_preadtor_critics))
             
-            target = torch.tensor(prey_rewards[i-1]) + gamma * torch.min(torch.cat(own_next_criric), torch.cat(next_preadtor_critics)).detach()
+            prey_target = torch.tensor(prey_rewards[i-1]) + gamma * torch.min(torch.cat(own_next_criric), torch.cat(next_preadtor_critics)).detach()
             # get critics based on current state
             prey_critic_value = [p.critic(state[i-1][0], torch.tensor(action[i-1])) for state, action in zip(prey_states, prey_actions)]
             prey_critic_value = torch.cat(prey_critic_value)
             
             # update crtic network
-            prey_critic_loss = F.mse_loss(prey_critic_value, target)
+            prey_critic_loss = F.mse_loss(prey_critic_value, prey_target)
             p.critic_optimizer.zero_grad()
             prey_critic_loss.backward(retain_graph=True)
             p.critic_optimizer.step()
 
             
             # Update the actor network
-            prey_action_loss = -prey_critic_value.mean()
-            prey_action_loss_copy = prey_action_loss.clone()
-            p.actor_optimizer.zero_grad()
-            prey_action_loss_copy.backward()
-            p.actor_optimizer.step()
+            #prey_action_loss = -prey_critic_value.mean()
+            #prey_action_loss_copy = prey_action_loss.clone()
+            #p.actor_optimizer.zero_grad()
+            #prey_action_loss_copy.backward()
+            #p.actor_optimizer.step()
             
             
            
        
-        for p in self.predator:
-            pass
+        for i,p in enumerate(self.prey):
+            if len(self.memory) > batch_size:
+                mini_sample = random.sample(self.memory, batch_size) # list of tuples
+            else:
+                mini_sample = self.memory
+
+            # unload the memory
+            prey_states,prey_actions,prey_rewards,prey_next_states,predator_states,predator_actions,predator_rewards,predator_next_states= zip(*mini_sample)
+            
+             
+            next_prey_critics = []
+            
+            for i,prey in enumerate(self.prey):
+                
+                # get the next predator moves and critic values based on their current parameters
+                next_moves = [prey.model(state[i][0],state[i][1],state[i][2])[0] for state in prey_next_states]
+                next_prey_critics.append([prey.critic(state[i][0], action) for state, action in zip(prey_next_states, next_moves)])
+                
+            predator_target = torch.tensor(prey_rewards[i-1]) + gamma * torch.min(torch.cat(own_next_criric), torch.cat(next_preadtor_critics)).detach()
+            # get critics based on current state
+            predator_critic_value = [p.critic(state[i-1][0], torch.tensor(action[i-1])) for state, action in zip(predator_states, predator_actions)]
+            predator_critic_value = torch.cat(predator_critic_value)
+       
+            # update crtic network
+            predator_critic_loss = F.mse_loss(predator_critic_value, predator_target)
+            p.critic_optimizer.zero_grad()
+            predator_critic_loss.backward(retain_graph=True)
+            p.critic_optimizer.step()
+            
+        
+    def train_actors(self,gamma=0.95,batch_size=32):
+        print('training actors ...')
+        #update all preys
+        for i,p in enumerate(self.prey):
+            
+            #update score
+            p.scores.append(p.goal)
+            p.n_games += 1
+            
+            if len(self.memory) > batch_size:
+                mini_sample = random.sample(self.memory, batch_size) # list of tuples
+            else:
+                mini_sample = self.memory
+
+            # unload the memory
+            prey_states,prey_actions,prey_rewards,prey_next_states,predator_states,predator_actions,predator_rewards,predator_next_states= zip(*mini_sample)
+            
+
+            # get critics based on current state
+            prey_critic_value = [p.critic(state[i][0], torch.tensor(action[i])) for state, action in zip(prey_states, prey_actions)]
+            prey_critic_value = torch.cat(prey_critic_value)
+            
+            # Update the actor network
+            prey_action_loss = -prey_critic_value.mean()
+            p.actor_optimizer.zero_grad()
+            prey_action_loss.backward()
+            p.actor_optimizer.step()
+        
+        
+        #update predator actor
+        for i,p in enumerate(self.predator):
+            
+            #update score
+            p.scores.append(p.goal)
+            p.n_games += 1
+            
+            if len(self.memory) > batch_size:
+                mini_sample = random.sample(self.memory, batch_size) # list of tuples
+            else:
+                mini_sample = self.memory
+
+            # unload the memory
+            prey_states,prey_actions,prey_rewards,prey_next_states,predator_states,predator_actions,predator_rewards,predator_next_states= zip(*mini_sample)
+            
+
+            # get critics based on current state
+            predator_critic_value = [p.critic(state[i-1][0], torch.tensor(action[i-1])) for state, action in zip(predator_states, predator_actions)]
+            predator_critic_value = torch.cat(predator_critic_value)
+            
+            # Update the actor network
+            predator_action_loss = -predator_critic_value.mean()
+            p.actor_optimizer.zero_grad()
+            predator_action_loss.backward()
+            p.actor_optimizer.step()
+            
+    
+    def eval(self):
+        for i,p in  enumerate(self.prey):
+            score = float(p.goal.sum())
+            
+           
+            if score > self.best_prey_score:
+                self.best_prey_score = score
+            
+                with open("Project2_continous/model/prey"+str(i)+".pkl", "wb") as f:
+                    pickle.dump(p, f)
+            
+                
+            #save the scores
+            update_file(file_path="Project2_continous/Scores/prey"+str(i)+".csv",value=score)
+            
+            
+        for i,p in enumerate(self.predator):
+            score = float(p.goal.sum())
+            
+           
+            
+            if score > self.best_predator_score:
+                self.best_predator_score = score
+            
+                with open("Project2_continous/model/predator"+str(i)+".pkl", "wb") as f:
+                    pickle.dump(p, f)
+            
+                
+            #save the scores
+            update_file(file_path="Project2_continous/Scores/predator"+str(i)+".csv",value=score)
+        
+            
             
         
     def update(self):
@@ -223,9 +347,18 @@ class Game:
             #rememeber
          
         self.remember(old_prey_states,prey_actions,prey_rewards,new_prey_states,old_predator_states,predator_actions,predator_rewards,new_predator_states)
+        
+        
             
      
     def pick_new_landmark(self):
+        
+        #reset positions
+        self.predator[0].pos = [20,20]
+        self.predator[1].pos = [SCREEN_WIDTH-20,SCREEN_HEIGHT-20]
+        
+        self.prey[0].pos = [SCREEN_WIDTH/2,SCREEN_HEIGHT/2]
+        
         self.current = random.randint(0, len(self.landmarks)-1)
         
     
@@ -259,7 +392,7 @@ game.predator=[predator1,predator2]
 game.prey = [prey1]
 game.init_coms()
 
-max_episode_length = 5
+max_episode_length = 100
 # Game loop
 running = True
 clock = pygame.time.Clock()
@@ -271,15 +404,15 @@ while running:
 
         
         for i in range(max_episode_length):
-            game.render()
+            #game.render()
             game.update()
             
             
-        game.train(batch_size=32)
-            
+        game.train_critics(batch_size=32)
+        game.train_actors()
+        game.eval()
+        game.pick_new_landmark()
         
-        #game.pick_new_landmark()
-        clock.tick(2)
       
     
 # Quit Pygame

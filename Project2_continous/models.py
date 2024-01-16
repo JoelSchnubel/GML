@@ -162,31 +162,6 @@ class Critic(nn.Module):
     
     
 
-class QTrainer:
-    def __init__(self, model,critic, lr, gamma):
-        self.lr = lr
-        self.gamma = gamma
-        self.model = model
-        self.critic = critic
-        self.optimizer = optim.Adam(model.parameters(), lr=self.lr)
-        self.criterion = nn.MSELoss()
-
-    
-    
-    def train_step(self, state, action, reward, next_state,communication_streams,private_goal,world):
-        
-        
-        critics = [p.critic for p in world.prey] + [p.critic for p in world.predator]
-        prey_models = [p.model for p in world.prey]
-        pred_models = [p.model for p in world.predator]
-        prey_goals = [p.goal for p in world.prey] 
-        preadotr_goals =[p.goal for p in world.predator]
-            
-
-        
-      
-  
-
 # Create an instance of the PolicyNetwork class
 #action_space_size = 2
 #state_size = 9
