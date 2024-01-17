@@ -6,12 +6,13 @@ import math
 import torch
 import torch.optim as optim
 
+
 MAX_MEMORY = 100_000
 BATCH_SIZE = 1024
 LR = 0.01
 LANDMARK_RADIUS = 30
-SCREEN_WIDTH = 1200
-SCREEN_HEIGHT = 800
+SCREEN_WIDTH = 800
+SCREEN_HEIGHT = 600
 
 def normalize_angle(theta):
     # Ensure theta is within [0, 2*pi)
@@ -217,9 +218,9 @@ class Predator(Agent):
             hit = check_range(self.pos[0],self.pos[1],self.size,p.pos[0],p.pos[1],p.size) or hit 
         
         
-        reward = 100 - torch.sum(self.goal) + 1000 * hit
+        reward =  -torch.sum(self.goal)/1000 + 10 * hit
         
-        self.scores.append(reward)
+        #self.scores.append(reward)
         
         return reward
 
@@ -237,12 +238,12 @@ class Prey(Agent):
     def get_reward(self,world):
         #check for intersection
         hit = 0
-        for p in world.prey: 
+        for p in world.predator: 
             hit = check_range(self.pos[0],self.pos[1],self.size,p.pos[0],p.pos[1],p.size) or hit 
         
         
-        reward = torch.sum(self.goal) - 1000 * hit
+        reward = torch.sum(self.goal)/1000 - 10 * hit
         
-        self.scores.append(reward)
+        #self.scores.append(reward)
         
         return reward

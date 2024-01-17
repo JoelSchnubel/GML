@@ -6,6 +6,7 @@ import torch
 from collections import deque
 import torch.nn.functional as F
 import pickle
+import numpy as np
 # Initialize Pygame
 pygame.init()
 
@@ -17,14 +18,19 @@ GREEN = [0,255,0]
 BLUE = [0,0,255]
 
 # Define window size
-SCREEN_WIDTH = 1200
-SCREEN_HEIGHT = 800
+SCREEN_WIDTH = 800
+SCREEN_HEIGHT = 600
 LANDMARK_RADIUS = 30
 MAX_MEMORY = 100_000
 
 def update_file(file_path,value):
     with open (file_path,'a') as f:
         f.write(str(value) + '\n')
+        
+def check_range(x,y,r, other_x,other_y,other_r):
+    distance_to_landmark = math.sqrt((x - other_x)**2 + (y - other_y)**2)
+    combined_radius = r + other_r
+    return int(distance_to_landmark <= combined_radius)
 
 #torch.autograd.set_detect_anomaly(True)
 class Game:
@@ -45,7 +51,18 @@ class Game:
        
         
     def create_landmarks(self,seed,num_worlds,num_landmarks):
- 
+        print('creating landmarks ...')
+        
+        agent_positions = []
+        
+        for p in self.predator:
+            agent_positions.append(p.pos)
+            
+        for p in self.prey:
+            agent_positions.append(p.pos)
+
+        size = self.prey[0].size
+        
         random.seed(seed)
         for i in range(num_worlds):
             landmark = []
@@ -53,12 +70,20 @@ class Game:
                 
                 x = random.randint(LANDMARK_RADIUS, SCREEN_WIDTH-LANDMARK_RADIUS)
                 y = random.randint(LANDMARK_RADIUS, SCREEN_HEIGHT-LANDMARK_RADIUS)
+
+                #make sure landmarks and agents dont overlap
+                while any(check_range(x, y, LANDMARK_RADIUS + 20, pos[0], pos[1], size) for pos in agent_positions):
+                    x = random.randint(LANDMARK_RADIUS, SCREEN_WIDTH-LANDMARK_RADIUS)
+                    y = random.randint(LANDMARK_RADIUS, SCREEN_HEIGHT-LANDMARK_RADIUS)
+                
+                    
                 landmark.append([x,y])
 
             self.landmarks.append(landmark)
             
     
     def init_coms(self):
+        print('initilize communications ...')
         self.prey_coms = [0] * len(self.prey)
         self.predator_coms = [0] * len(self.predator)
         
@@ -103,6 +128,7 @@ class Game:
             # calc target vector y as min of critcs
             #target = torch.tensor(prey_rewards[i-1]) + gamma * torch.min(torch.cat(own_next_criric),torch.cat(next_preadtor_critics))
             
+            
             prey_target = torch.tensor(prey_rewards[i-1]) + gamma * torch.min(torch.cat(own_next_criric), torch.cat(next_preadtor_critics)).detach()
             # get critics based on current state
             prey_critic_value = [p.critic(state[i-1][0], torch.tensor(action[i-1])) for state, action in zip(prey_states, prey_actions)]
@@ -134,7 +160,8 @@ class Game:
             # unload the memory
             prey_states,prey_actions,prey_rewards,prey_next_states,predator_states,predator_actions,predator_rewards,predator_next_states= zip(*mini_sample)
             
-             
+            predator_rewards = np.transpose(np.array(predator_rewards))
+            
             next_prey_critics = []
             
             for i,prey in enumerate(self.prey):
@@ -143,7 +170,7 @@ class Game:
                 next_moves = [prey.model(state[i][0],state[i][1],state[i][2])[0] for state in prey_next_states]
                 next_prey_critics.append([prey.critic(state[i][0], action) for state, action in zip(prey_next_states, next_moves)])
                 
-            predator_target = torch.tensor(prey_rewards[i-1]) + gamma * torch.min(torch.cat(own_next_criric), torch.cat(next_preadtor_critics)).detach()
+            predator_target = torch.tensor(predator_rewards[i-1]) + gamma * torch.min(torch.cat(own_next_criric), torch.cat(next_preadtor_critics)).detach()
             # get critics based on current state
             predator_critic_value = [p.critic(state[i-1][0], torch.tensor(action[i-1])) for state, action in zip(predator_states, predator_actions)]
             predator_critic_value = torch.cat(predator_critic_value)
@@ -213,7 +240,7 @@ class Game:
     
     def eval(self):
         for i,p in  enumerate(self.prey):
-            score = float(p.goal.sum())
+            score = float(p.get_reward(self)) + p.n_games
             
            
             if score > self.best_prey_score:
@@ -224,11 +251,11 @@ class Game:
             
                 
             #save the scores
-            update_file(file_path="Project2_continous/Scores/prey"+str(i)+".csv",value=score)
+            update_file(file_path="Project2_continous/Scores/prey"+str(i)+".csv",value=score-p.n_games)
             
             
         for i,p in enumerate(self.predator):
-            score = float(p.goal.sum())
+            score =  float(p.get_reward(self)) + p.n_games
             
            
             
@@ -240,10 +267,26 @@ class Game:
             
                 
             #save the scores
-            update_file(file_path="Project2_continous/Scores/predator"+str(i)+".csv",value=score)
+            update_file(file_path="Project2_continous/Scores/predator"+str(i)+".csv",value=score-p.n_games)
         
             
-            
+    
+    def load_models(self):
+        print('Loading models ...')
+        # Load the model from the file
+        with open("Project2_continous/model/predator0.pkl", "rb") as f:
+            predator0_model = pickle.load(f)
+        self.predator[0] = predator0_model   
+        
+        with open("Project2_continous/model/predator1.pkl", "rb") as f:
+            predator1_model = pickle.load(f)
+        self.predator[1] = predator1_model  
+        
+        with open("Project2_continous/model/prey0.pkl", "rb") as f:
+            prey0_model = pickle.load(f)
+        self.prey[0] = prey0_model    
+        
+        #TODO load to scores form the csv files
         
     def update(self):
 
@@ -260,7 +303,7 @@ class Game:
         new_predator_states = []
         predator_rewards = []
         
-            
+    
         # get new coms
         for i,p in enumerate(self.prey):
             self.prey_coms[i] = p.com
@@ -348,9 +391,7 @@ class Game:
          
         self.remember(old_prey_states,prey_actions,prey_rewards,new_prey_states,old_predator_states,predator_actions,predator_rewards,new_predator_states)
         
-        
-            
-     
+
     def pick_new_landmark(self):
         
         #reset positions
@@ -385,33 +426,37 @@ prey1 = Prey(pos = [SCREEN_WIDTH/2,SCREEN_HEIGHT/2],max_velocity=25,color=GREEN,
 predator1 =Predator(pos = [20,20],max_velocity=15,color=RED,communication_size=32,num_communication_streams=2,state_size=9,goal_size=1)
 predator2 =Predator(pos = [SCREEN_WIDTH-20,SCREEN_HEIGHT-20],max_velocity=15,color=RED,communication_size=32,num_communication_streams=2,state_size=9,goal_size=1)
 
-
 game = Game(SCREEN_WIDTH,SCREEN_HEIGHT)
-game.create_landmarks(seed=42,num_worlds=3,num_landmarks=5)
 game.predator=[predator1,predator2]
 game.prey = [prey1]
+game.create_landmarks(seed=42,num_worlds=3,num_landmarks=5)
 game.init_coms()
+game.load_models()
 
 max_episode_length = 100
+
 # Game loop
 running = True
 clock = pygame.time.Clock()
+
 while running:
     # Check for events
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
+    
+    
+    #for event in pygame.event.get():
+    #    if event.type == pygame.QUIT:
+    #        running = False
 
         
-        for i in range(max_episode_length):
-            #game.render()
-            game.update()
+    for i in range(max_episode_length):
+        #game.render()
+        game.update()
             
             
-        game.train_critics(batch_size=32)
-        game.train_actors()
-        game.eval()
-        game.pick_new_landmark()
+    game.train_critics(batch_size=32)
+    game.train_actors()
+    game.eval()
+    game.pick_new_landmark()
         
       
     
