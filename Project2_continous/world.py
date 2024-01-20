@@ -7,6 +7,8 @@ from collections import deque
 import torch.nn.functional as F
 import pickle
 import numpy as np
+import csv
+
 # Initialize Pygame
 pygame.init()
 
@@ -21,40 +23,46 @@ BLUE = [0,0,255]
 SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 600
 LANDMARK_RADIUS = 30
-MAX_MEMORY = 100_000
+MAX_MEMORY = 20_000
+BATCH_SIZE = 256
 
+# updateing a csv file by append a value
 def update_file(file_path,value):
     with open (file_path,'a') as f:
         f.write(str(value) + '\n')
         
+# return true if [x,y] with radius r touched [other_x,other_y] with radius other_r
 def check_range(x,y,r, other_x,other_y,other_r):
     distance_to_landmark = math.sqrt((x - other_x)**2 + (y - other_y)**2)
     combined_radius = r + other_r
     return int(distance_to_landmark <= combined_radius)
 
-#torch.autograd.set_detect_anomaly(True)
+
 class Game:
-    def __init__(self,width,height,prey=[],predator=[]):
-        self.width = width
-        self.height = height
+    def __init__(self,width,height,prey=[],predator=[]): 
+        self.width = width # screen width
+        self.height = height # screen height
         self.landmarks = []
         self.prey = prey
         self.predator = predator
-        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-        self.current = 0
+        self.screen = pygame.display.set_mode((width, height))
+        self.current = 0 # current landmark index 
         self.predator_coms = []
         self.prey_coms = []
-        self.memory = deque(maxlen=MAX_MEMORY) # popleft()
+        self.memory = deque(maxlen=MAX_MEMORY) # popleft() if full
         
+        # init scores 
         self.best_prey_score = -math.inf
         self.best_predator_score = -math.inf
-       
         
+    # create n_world maps with num_landmarks and storing them. 
+    # can be access using self.current 
+    # make sure to first create the agents and the create the landmarks 
     def create_landmarks(self,seed,num_worlds,num_landmarks):
         print('creating landmarks ...')
         
+        # get positions of all agents
         agent_positions = []
-        
         for p in self.predator:
             agent_positions.append(p.pos)
             
@@ -63,10 +71,13 @@ class Game:
 
         size = self.prey[0].size
         
+        # set seed
         random.seed(seed)
-        for i in range(num_worlds):
+        
+        # create the landmarks
+        for _ in range(num_worlds):
             landmark = []
-            for j in range(num_landmarks):
+            for _ in range(num_landmarks):
                 
                 x = random.randint(LANDMARK_RADIUS, SCREEN_WIDTH-LANDMARK_RADIUS)
                 y = random.randint(LANDMARK_RADIUS, SCREEN_HEIGHT-LANDMARK_RADIUS)
@@ -81,56 +92,62 @@ class Game:
 
             self.landmarks.append(landmark)
             
-    
+    # initilizing the coms 
+    # make sure to first create the agents
     def init_coms(self):
         print('initilize communications ...')
         self.prey_coms = [0] * len(self.prey)
         self.predator_coms = [0] * len(self.predator)
         
-        
+    # append state to memory
     def remember(self,prey_states,prey_actions,prey_rewards,prey_next_states,predator_states,predator_actions,predator_rewards,predator_next_states):
-        #states : (state,coms,goal)
-        #next_staes : (state,coms,goal)
+        # states : (state,coms,goal)
+        # next_staes : (state,coms,goal)
+        # actions : (theta , velocity)
         self.memory.append((prey_states,prey_actions,prey_rewards,prey_next_states,predator_states,predator_actions,predator_rewards,predator_next_states))
         
-    def train_critics(self,gamma=0.95,batch_size=32):
-        print('training critics ...')
+    # train all the agents 
+    def train_critics(self,gamma=0.95,batch_size=BATCH_SIZE,simple_prey=False,simple_predator=False):
+        # only train if memory > batchsize
+        if len(self.memory) > batch_size:
+            print('training critics ...')
         
-        #update all preys
+        # update all prey critics
         for i,p in enumerate(self.prey):
             
+            # only train if memory is ar least of size = batch_size
             if len(self.memory) > batch_size:
                 mini_sample = random.sample(self.memory, batch_size) # list of tuples
             else:
-                mini_sample = self.memory
-
+                return
+            
             # unload the memory
             prey_states,prey_actions,prey_rewards,prey_next_states,predator_states,predator_actions,predator_rewards,predator_next_states= zip(*mini_sample)
             
-            
-            next_preadtor_critics = []
-            
+            # get the next predator moves and critic values based on their current parameters
+            next_predator_critics = []
             for i,pred in enumerate(self.predator):
+                if simple_predator:
+                    next_moves = [pred.simpel_model(state[i][0],state[i][2]) for state in predator_next_states]
+                else:
+                    next_moves = [pred.model(state[i][0],state[i][1],state[i][2])[0] for state in predator_next_states]
+                next_predator_critics.append([pred.critic(state[i][0], action) for state, action in zip(predator_next_states, next_moves)])
                 
-                # get the next predator moves and critic values based on their current parameters
-                next_moves = [pred.model(state[i][0],state[i][1],state[i][2])[0] for state in predator_next_states]
-                next_preadtor_critics.append([pred.critic(state[i][0], action) for state, action in zip(predator_next_states, next_moves)])
-                
-            # take  elementwise mean of the predators critics
-            combined_list = list(zip(*next_preadtor_critics))
-            next_preadtor_critics = [torch.mean(torch.tensor(position_values)).view(-1) for position_values in combined_list]
+            # take elementwise mean of the predators critics
+            combined_list = list(zip(*next_predator_critics))
+            next_predator_critics = [torch.mean(torch.tensor(position_values)).view(-1) for position_values in combined_list]
 
             # get own moves and critic values based on current parameters
-            own_next_moves = [p.model(state[i-1][0],state[i-1][1],state[i-1][2])[0] for state in prey_next_states]
-            own_next_criric = [p.critic(state[i-1][0], action) for state, action in zip(prey_next_states, own_next_moves)]
+            if simple_prey:
+                own_next_moves = [p.simpel_model(state[i-1][0],state[i-1][2]) for state in prey_next_states]
+            else:
+                own_next_moves = [p.model(state[i-1][0],state[i-1][1],state[i-1][2])[0] for state in prey_next_states]
+            prey_own_next_critic = [p.critic(state[i-1][0], action) for state, action in zip(prey_next_states, own_next_moves)]
             
+            # calc target vector y as min of critcs        
+            prey_target = torch.tensor(prey_rewards[i-1]) + gamma * torch.min(torch.cat(prey_own_next_critic), torch.cat(next_predator_critics)).detach()
             
-            # calc target vector y as min of critcs
-            #target = torch.tensor(prey_rewards[i-1]) + gamma * torch.min(torch.cat(own_next_criric),torch.cat(next_preadtor_critics))
-            
-            
-            prey_target = torch.tensor(prey_rewards[i-1]) + gamma * torch.min(torch.cat(own_next_criric), torch.cat(next_preadtor_critics)).detach()
-            # get critics based on current state
+            # get critics based on current parameters
             prey_critic_value = [p.critic(state[i-1][0], torch.tensor(action[i-1])) for state, action in zip(prey_states, prey_actions)]
             prey_critic_value = torch.cat(prey_critic_value)
             
@@ -140,38 +157,46 @@ class Game:
             prey_critic_loss.backward(retain_graph=True)
             p.critic_optimizer.step()
 
+
+        # update all prey predator
+        for i,p in enumerate(self.predator):
             
-            # Update the actor network
-            #prey_action_loss = -prey_critic_value.mean()
-            #prey_action_loss_copy = prey_action_loss.clone()
-            #p.actor_optimizer.zero_grad()
-            #prey_action_loss_copy.backward()
-            #p.actor_optimizer.step()
-            
-            
-           
-       
-        for i,p in enumerate(self.prey):
+            # only train if memory is ar least of size = batch_size
             if len(self.memory) > batch_size:
                 mini_sample = random.sample(self.memory, batch_size) # list of tuples
             else:
-                mini_sample = self.memory
-
+                return
+    
             # unload the memory
             prey_states,prey_actions,prey_rewards,prey_next_states,predator_states,predator_actions,predator_rewards,predator_next_states= zip(*mini_sample)
             
+            # transpose for easier accessing down the line
             predator_rewards = np.transpose(np.array(predator_rewards))
             
+            # get the next prey moves and critic values based on their current parameters
             next_prey_critics = []
-            
             for i,prey in enumerate(self.prey):
                 
-                # get the next predator moves and critic values based on their current parameters
-                next_moves = [prey.model(state[i][0],state[i][1],state[i][2])[0] for state in prey_next_states]
+                if simple_prey:
+                    next_moves = [prey.simpel_model(state[i][0],state[i][2]) for state in prey_next_states]
+                else:
+                    next_moves = [prey.model(state[i][0],state[i][1],state[i][2])[0] for state in prey_next_states]
                 next_prey_critics.append([prey.critic(state[i][0], action) for state, action in zip(prey_next_states, next_moves)])
+            
+            combined_list = list(zip(*next_prey_critics))
+            next_prey_critics = [torch.mean(torch.tensor(position_values)).view(-1) for position_values in combined_list]
+            
+            if simple_predator:
+                own_next_moves = [p.simpel_model(state[i][0],state[i][2]) for state in predator_next_states]
+            else:
+                own_next_moves = [p.model(state[i][0],state[i][1],state[i][2])[0] for state in predator_next_states]
                 
-            predator_target = torch.tensor(predator_rewards[i-1]) + gamma * torch.min(torch.cat(own_next_criric), torch.cat(next_preadtor_critics)).detach()
-            # get critics based on current state
+            predator_own_next_criric = [p.critic(state[i][0], action) for state, action in zip(predator_next_states, own_next_moves)]
+                
+            # calc target vector y as min of critcs  
+            predator_target = torch.tensor(predator_rewards[i]) + gamma * torch.min(torch.cat(predator_own_next_criric), torch.cat(next_prey_critics)).detach()
+            
+            # get own critics based on current parameters
             predator_critic_value = [p.critic(state[i-1][0], torch.tensor(action[i-1])) for state, action in zip(predator_states, predator_actions)]
             predator_critic_value = torch.cat(predator_critic_value)
        
@@ -181,25 +206,28 @@ class Game:
             predator_critic_loss.backward(retain_graph=True)
             p.critic_optimizer.step()
             
-        
-    def train_actors(self,gamma=0.95,batch_size=32):
-        print('training actors ...')
-        #update all preys
+    
+    # train all the agents actors
+    def train_actors(self,batch_size=BATCH_SIZE):
+        # only train if memory > batchsize
+        if len(self.memory) > batch_size:
+            print('training actors ...')
+            
+        # update all preys actors
         for i,p in enumerate(self.prey):
             
-            #update score
+            #update score and n_games
             p.scores.append(p.goal)
             p.n_games += 1
             
             if len(self.memory) > batch_size:
                 mini_sample = random.sample(self.memory, batch_size) # list of tuples
             else:
-                mini_sample = self.memory
-
+                return
+                
             # unload the memory
-            prey_states,prey_actions,prey_rewards,prey_next_states,predator_states,predator_actions,predator_rewards,predator_next_states= zip(*mini_sample)
+            prey_states,prey_actions,_,_,predator_states,predator_actions,_,_= zip(*mini_sample)
             
-
             # get critics based on current state
             prey_critic_value = [p.critic(state[i][0], torch.tensor(action[i])) for state, action in zip(prey_states, prey_actions)]
             prey_critic_value = torch.cat(prey_critic_value)
@@ -211,22 +239,21 @@ class Game:
             p.actor_optimizer.step()
         
         
-        #update predator actor
+        # update predator actor
         for i,p in enumerate(self.predator):
             
-            #update score
+            #update score and n_games
             p.scores.append(p.goal)
             p.n_games += 1
             
             if len(self.memory) > batch_size:
                 mini_sample = random.sample(self.memory, batch_size) # list of tuples
             else:
-                mini_sample = self.memory
-
+                return
+                
             # unload the memory
-            prey_states,prey_actions,prey_rewards,prey_next_states,predator_states,predator_actions,predator_rewards,predator_next_states= zip(*mini_sample)
-            
-
+            prey_states,prey_actions,_,_,predator_states,predator_actions,_,_= zip(*mini_sample)
+        
             # get critics based on current state
             predator_critic_value = [p.critic(state[i-1][0], torch.tensor(action[i-1])) for state, action in zip(predator_states, predator_actions)]
             predator_critic_value = torch.cat(predator_critic_value)
@@ -237,58 +264,76 @@ class Game:
             predator_action_loss.backward()
             p.actor_optimizer.step()
             
+    # evaluating the models and appending scores to the respectiv .csv file
     
-    def eval(self):
+    # TODO switch p.n_games for number of turns it took to reach goal
+    def eval(self,prey_name='',predator_name=''):
+        
+        # eval prey agents
         for i,p in  enumerate(self.prey):
-            score = float(p.get_reward(self)) + p.n_games
             
-           
-            if score > self.best_prey_score:
+            # increase score per game such that later models get more likely stored
+            score ,_ = p.get_reward(self)
+            score = float(score) + p.n_games
+
+            if score > self.best_prey_score: # update global best score
                 self.best_prey_score = score
-            
-                with open("Project2_continous/model/prey"+str(i)+".pkl", "wb") as f:
+
+                # store the model
+                with open("Project2_continous/model/prey"+str(i)+str(prey_name)+".pkl", "wb") as f:
                     pickle.dump(p, f)
             
-                
             #save the scores
-            update_file(file_path="Project2_continous/Scores/prey"+str(i)+".csv",value=score-p.n_games)
+            update_file(file_path="Project2_continous/Scores/prey"+str(i)+str(prey_name)+".csv",value=score-p.n_games)
             
-            
+        # eval predator agents
         for i,p in enumerate(self.predator):
-            score =  float(p.get_reward(self)) + p.n_games
             
-           
+             # increase score per game such that later models get more likely stored
+            score ,_ = p.get_reward(self)
+            score = float(score) + p.n_games
             
-            if score > self.best_predator_score:
+            if score > self.best_predator_score: # update global best score
                 self.best_predator_score = score
-            
-                with open("Project2_continous/model/predator"+str(i)+".pkl", "wb") as f:
+                
+                # store the model
+                with open("Project2_continous/model/predator"+str(i)+str(predator_name)+".pkl", "wb") as f:
                     pickle.dump(p, f)
             
-                
             #save the scores
-            update_file(file_path="Project2_continous/Scores/predator"+str(i)+".csv",value=score-p.n_games)
+            update_file(file_path="Project2_continous/Scores/predator"+str(i)+str(predator_name)+".csv",value=score-p.n_games)
         
             
-    
-    def load_models(self):
+    # Loading models
+    def load_models(self,prey_name='',predator_name=''):
         print('Loading models ...')
-        # Load the model from the file
-        with open("Project2_continous/model/predator0.pkl", "rb") as f:
-            predator0_model = pickle.load(f)
-        self.predator[0] = predator0_model   
         
-        with open("Project2_continous/model/predator1.pkl", "rb") as f:
-            predator1_model = pickle.load(f)
-        self.predator[1] = predator1_model  
-        
-        with open("Project2_continous/model/prey0.pkl", "rb") as f:
-            prey0_model = pickle.load(f)
-        self.prey[0] = prey0_model    
-        
-        #TODO load to scores form the csv files
-        
-    def update(self):
+        for i,p in enumerate(self.predator):
+            with open("Project2_continous/model/predator"+str(i)+str(predator_name)+".pkl", "rb") as f:
+                predator_model = pickle.load(f)
+            self.predator[i] = predator_model
+            
+            with open ("Project2_continous/Scores/predator"+str(i)+str(predator_name)+".csv",'r') as f:
+                reader = csv.reader(f)
+                values = [float(row[0]) for row in reader]
+                if max(values) > self.best_predator_score:
+                    self.best_predator_score = max(values)
+            p.num_games = len(values)
+                    
+        for i,p in enumerate(self.prey):
+            with open("Project2_continous/model/prey"+str(i)+str(prey_name)+".pkl", "rb") as f:
+                prey_model = pickle.load(f)
+            self.predator[i] = predator_model
+            
+            with open ("Project2_continous/Scores/prey"+str(i)+str(prey_name)+".csv",'r') as f:
+                reader = csv.reader(f)
+                values = [float(row[0]) for row in reader]
+                if max(values) > self.best_prey_score:
+                    self.best_prey_score = max(values)
+            p.num_games = len(values)
+            
+    # update the agents     
+    def update(self,simple_Prey=False,simple_Predator=False):
 
         old_prey_states = []
         prey_actions = []
@@ -303,6 +348,7 @@ class Game:
         new_predator_states = []
         predator_rewards = []
         
+        done = 0
     
         # get new coms
         for i,p in enumerate(self.prey):
@@ -312,14 +358,18 @@ class Game:
             self.predator_coms[i] = p.com
         
         
-        #select actions and coms w.r.t current policy for pry
+        #select actions and coms w.r.t current policy for prey
         for i,p in enumerate(self.prey):
             
             state = p.get_x_vector(self)
             
             old_prey_states.append((state,self.prey_coms[i],p.goal))
-    
-            action , new_coms = p.get_action_communication(state,self.prey_coms,p.goal)
+
+            if simple_Prey:
+                action =  p.get_simple_action(state,p.goal)
+                new_coms = 0
+            else:
+                action , new_coms = p.get_action_communication(state,self.prey_coms,p.goal)
             p.coms = new_coms
             
             prey_actions.append(action)
@@ -333,28 +383,24 @@ class Game:
             
             state = p.get_x_vector(self)
             
-            
             old_predator_states.append((state,self.predator_coms[i],p.goal))
-    
-            action , new_coms = p.get_action_communication(state,self.predator_coms,p.goal)
+            if simple_Predator:
+                action =  p.get_simple_action(state,p.goal)
+                new_coms = 0
+            else:
+                action , new_coms = p.get_action_communication(state,self.predator_coms,p.goal)
             p.coms = new_coms
             
             predator_actions.append(action)
             new_predator_coms.append(new_coms)
            
-        
-        
-        
-        
         # execute actions 
         for p,action in zip(self.prey,prey_actions):
-            #execute the actions
             p.update_pos(action[0],action[1],self)
             
             
         # execute actions 
         for p,action in zip(self.predator,predator_actions):
-            #execute the actions
             p.update_pos(action[0],action[1],self)
             
             
@@ -363,35 +409,39 @@ class Game:
         
             #update reward and new state 
             p.update_goal(self)
-            reward = p.get_reward(self)
+            reward, hit = p.get_reward(self)
             new_state = p.get_x_vector(self)
+            
             #update coms
-           
-          
             self.prey_coms[i] = new_prey_coms[i]
             new_prey_states.append((new_state,self.prey_coms,p.goal))
             prey_rewards.append(reward)
-            #rememeber
+        
+            done = hit or done
             
             
-        #observe reward and new state
+        # observe reward and new state
         for i,p in enumerate(self.predator):
         
-            #update reward and new state 
+            # update reward and new state 
             p.update_goal(self)
-            reward = p.get_reward(self)
+            reward , hit = p.get_reward(self)
             new_state = p.get_x_vector(self)
-            #update coms
             
-           
+            #update coms
             self.predator_coms[i] = new_predator_coms[i]
             new_predator_states.append((new_state,self.predator_coms,p.goal))
             predator_rewards.append(reward)
-            #rememeber
-         
+            
+            done = hit or done
+        
+        # rememeber
         self.remember(old_prey_states,prey_actions,prey_rewards,new_prey_states,old_predator_states,predator_actions,predator_rewards,new_predator_states)
         
+        
+        return done
 
+    # pick a new landmark and reset the position of the agents
     def pick_new_landmark(self):
         
         #reset positions
@@ -400,9 +450,11 @@ class Game:
         
         self.prey[0].pos = [SCREEN_WIDTH/2,SCREEN_HEIGHT/2]
         
+        #change the landmark map
         self.current = random.randint(0, len(self.landmarks)-1)
         
     
+    # rendering pygame
     def render(self):
         
         self.screen.fill((255, 255, 255))
@@ -421,44 +473,50 @@ class Game:
        
 
 
+# define prey
+prey1 = Prey(pos = [SCREEN_WIDTH/2,SCREEN_HEIGHT/2],size=15 ,max_velocity=25,color=GREEN,communication_size=32,num_communication_streams=1,state_size=9,goal_size=2)
 
-prey1 = Prey(pos = [SCREEN_WIDTH/2,SCREEN_HEIGHT/2],max_velocity=25,color=GREEN,communication_size=32,num_communication_streams=1,state_size=9,goal_size=2)
-predator1 =Predator(pos = [20,20],max_velocity=15,color=RED,communication_size=32,num_communication_streams=2,state_size=9,goal_size=1)
-predator2 =Predator(pos = [SCREEN_WIDTH-20,SCREEN_HEIGHT-20],max_velocity=15,color=RED,communication_size=32,num_communication_streams=2,state_size=9,goal_size=1)
+# define predators
+predator1 =Predator(pos = [20,20],size=15, max_velocity=15,color=RED,communication_size=32,num_communication_streams=2,state_size=9,goal_size=1)
+predator2 =Predator(pos = [SCREEN_WIDTH-20,SCREEN_HEIGHT-20],size=15 ,max_velocity=15,color=RED,communication_size=32,num_communication_streams=2,state_size=9,goal_size=1)
 
+# init state
 game = Game(SCREEN_WIDTH,SCREEN_HEIGHT)
+
+# inputing agents to the game world
 game.predator=[predator1,predator2]
 game.prey = [prey1]
 game.create_landmarks(seed=42,num_worlds=3,num_landmarks=5)
 game.init_coms()
-game.load_models()
+#game.load_models(predator_name='MADDPG',prey_name='MADDPG')
 
-max_episode_length = 100
+max_episode_length = 120
 
 # Game loop
 running = True
 clock = pygame.time.Clock()
 
-while running:
-    # Check for events
-    
-    
-    #for event in pygame.event.get():
-    #    if event.type == pygame.QUIT:
-    #        running = False
+epochs = 100
 
-        
+for _ in range(epochs):
+    done = 0
+    
+ 
     for i in range(max_episode_length):
-        #game.render()
-        game.update()
+        if not done:
+            #game.render()
+            done = game.update()
+       
             
-            
-    game.train_critics(batch_size=32)
+    game.train_critics()
     game.train_actors()
-    game.eval()
+    game.eval(predator_name='MADDPG',prey_name='MADDPG')
     game.pick_new_landmark()
-        
+    
       
     
 # Quit Pygame
 pygame.quit()
+
+# Notice
+# After every 100 steps i need to stop and restart training with loaded models due to a lack of RAM on my PC. Therefore we need to assemble new training data here

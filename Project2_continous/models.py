@@ -1,28 +1,42 @@
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import torch.nn.functional as F
 import os
-import numpy as np
 import torch.distributions as dists
 
 
+# Simple Neural Network 
+class Simple_Actor(nn.Module):
+    def __init__(self, state_size,num_objects, goal_size, hidden_dim):
+        super(Simple_Actor, self).__init__()
+
+        self.network = nn.Sequential(
+            nn.Linear(state_size*num_objects+goal_size, hidden_dim,dtype=float),
+            nn.ReLU(),
+            nn.Dropout(p=0.1),
+            nn.Linear(hidden_dim, hidden_dim,dtype=float),
+            nn.ReLU(),
+            nn.Dropout(p=0.1),
+            nn.Linear(hidden_dim, 2,dtype=float)
+        )
+
+    def forward(self, state, goal):
+        x = torch.cat((state.view(-1), goal))
+        x = self.network(x)
+        return x
+    
+        
+# Main network from Emergence of Grounded Compositional Language in Multi-Agent Populations
 class Policy_Network(nn.Module):
     def __init__(self,communication_size,num_communication_streams ,state_size,action_space_size, goal_size,memory_size,hidden_size=256):
         super(Policy_Network, self).__init__()
         self.memory_size = memory_size
         self.action_space_size = action_space_size
-        # Define the fully-connected processing modules for communication streams and physical entities
-        
-        # Define the shared LSTM cell for communication streams  
-        #self.shared_communication_lstm = nn.LSTM(input_size=communication_size,hidden_size=256,num_layers=2,dropout=0.1)
-        
-        self.com_memory = []
-        for c in range(num_communication_streams):
-            self.com_memory.append(torch.zeros(memory_size,dtype=float))
-        
-        
+       
+        # initilaze the memory buffer for the communication streams
+        self.com_memory = [torch.zeros(memory_size, dtype=torch.float32) for _ in range(num_communication_streams)]
             
+        # Define the shared fully-connected processing module for communication streams
         self.shared_communication_module = nn.Sequential(
             nn.Linear(communication_size+memory_size, hidden_size,dtype=float),
             nn.ReLU(),
@@ -43,9 +57,12 @@ class Policy_Network(nn.Module):
         )
         
         # Define the pooling layer
-        self.pooling_layer = nn.Softmax(dim=0)
-
+        self.pooling_layer = nn.Softmax(dim=0)  
+        
+        # initilaze the memory buffer for the final layer
         self.final_memory = torch.zeros(memory_size,dtype=float)
+        
+        # define the final layer
         self.final_layer = nn.Sequential(
             nn.Linear(2*hidden_size+goal_size + memory_size, hidden_size,dtype=float),
             nn.ReLU(),
@@ -53,72 +70,55 @@ class Policy_Network(nn.Module):
             nn.Linear(hidden_size, action_space_size+communication_size+memory_size,dtype=float),
         )
         
-        
-  
+    # define forward pass 
     def forward(self, physical_observations,communication_streams, private_goal):
-        
-        # Process communication streams
-        #communication_features = []
-        #for i,stream in enumerate(communication_streams):
-        #    processed_stream = self.shared_communication_lstm(stream)
-        #    communication_features.append(processed_stream)
 
         # Process physical observations
         physical_features = []
+        
+        # forward passing each state representaion one after another -> weights are shared
         for i,observation in enumerate(physical_observations):
-            
-            
             processed_observation = self.shared_pyhisical_observation_module(observation)
             physical_features.append(processed_observation)
 
        
         communication_featues = []
+        # forward passing each communication stream one after another -> weights are shared
+        # each communication stream has its own personal memory vector 
         for i,(com,memory) in enumerate(zip(communication_streams,self.com_memory)):
             
-
+            # concat memeory + com-stream and pass through the shared module
             processed_communications = self.shared_communication_module(torch.cat([com,memory]))
-          
-            
             processed_communication_vector = processed_communications[:-self.memory_size]
-            
             
             communication_featues.append(processed_communication_vector)
             
+            # extraxt delta m
             delta_memory = processed_communications[-self.memory_size:]
-            
-         
-                
+             
             # Sample a zero-mean Gaussian noise tensor
             epsilon = dists.Normal(torch.zeros_like(memory), torch.ones_like(memory)).sample()
-            #update memory
+            
+            # update memory according to paper
             self.com_memory[i] = torch.tanh(memory+delta_memory+epsilon)
             
-            
-          
-       
-        
-        # Pool features
+        # Pool com and observation features
         pooled_communication_features = torch.sum(self.pooling_layer(torch.stack(communication_featues)),dim=0)
         pooled_physical_features = torch.sum(self.pooling_layer(torch.stack(physical_features)),dim=0)
-        
-        #print(pooled_communication_features.shape)
-        #print(pooled_physical_features.shape)
-        #print(private_goal.shape)
-        #print(self.final_memory.shape)
-
-
-        # Combine features
+     
+        # Combine features with private goal vector and final memory vector
         combined_features = torch.cat([pooled_communication_features, pooled_physical_features, private_goal,self.final_memory], dim=0)
         
-       
-        
+        # forward pass through final layer
         final_output = self.final_layer(combined_features)
-    
-    
+
+        # extraxt delta m
         delta_memory = final_output[-self.memory_size:]
         
-        #update memory
+        # Sample a zero-mean Gaussian noise tensor
         epsilon = dists.Normal(torch.zeros_like(delta_memory), torch.ones_like(delta_memory)).sample()
+        
+        # update memory
         self.final_memory = torch.tanh(self.final_memory+delta_memory+epsilon)
         
         # prepare actions
@@ -127,24 +127,14 @@ class Policy_Network(nn.Module):
         action = actions+action_epsilon
         
         
-        # prepare communications
+        # prepare communications using gumbel softmax 
         coms = final_output[self.action_space_size-1:self.memory_size+1]
         communication_symbol = F.gumbel_softmax(coms, tau=1, hard=False)
         
+        # return action [angle,velocity]  and communcication vector (size: communication_size)
         return action, communication_symbol
         
-
-
-    def save(self, file_name='model.pth'):
-        model_folder_path = './model'
-        if not os.path.exists(model_folder_path):
-            os.makedirs(model_folder_path)
-
-        file_name = os.path.join(model_folder_path, file_name)
-        torch.save(self.state_dict(), file_name)
-
-
-
+# simple Crtic Network
 class Critic(nn.Module):
     def __init__(self, state_size,num_objects, action_size, hidden_dim):
         super(Critic, self).__init__()
@@ -155,32 +145,11 @@ class Critic(nn.Module):
             nn.Linear(hidden_dim, 1,dtype=float)
         )
 
+    # out: value (for state,action) pair
     def forward(self, state, action):
+        # concat the state and action 
         x = torch.cat((state.view(-1), action))
         x = self.network(x)
         return x
     
     
-
-# Create an instance of the PolicyNetwork class
-#action_space_size = 2
-#state_size = 9
-#communication_size = 64
-#goal_size = 32
-#num_communication_streams = 2
-#memory_size = 32
-#policy_network = Policy_Network(communication_size,num_communication_streams ,state_size,action_space_size, goal_size,memory_size)
-
-# Initialize the network's weights
-#torch.nn.init.xavier_uniform_(policy_network.parameters())
-
-# Create input data
-#communication_streams = torch.randn(2, 64)
-#physical_observations = torch.randn(3, 9)
-#private_goal = torch.randn(32)
-
-# Pass the input data through the network
-#action, communication_symbol = policy_network(communication_streams, physical_observations, private_goal)
-
-#print(f"Action: {action}")
-#print(f"Communication symbol: {communication_symbol}")
