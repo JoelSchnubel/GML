@@ -5,38 +5,14 @@ from models import Policy_Network ,Critic,Simple_Actor
 import math
 import torch
 import torch.optim as optim
+from utils import normalize_angle ,check_range, adjust_position
 
-# define 
-MAX_MEMORY = 20_000
+# define hyperparameters
 LR = 0.01
 LANDMARK_RADIUS = 30
 SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 600
 
-# Ensure theta is within [0, 2*pi)
-def normalize_angle(theta):
-    return theta % (2 * math.pi)
-
-# return true if [x,y] with radius r touched [other_x,other_y] with radius other_r
-def check_range(x,y,r, other_x,other_y,other_r):
-    distance_to_landmark = math.sqrt((x - other_x)**2 + (y - other_y)**2)
-    combined_radius = r + other_r
-    return int(distance_to_landmark <= combined_radius)
-
-# collision between agent and landmark
-def adjust_position(agent_pos, agent_radius, landmark_pos, landmark_radius):
-    collision_vector = (agent_pos[0] - landmark_pos[0], agent_pos[1] - landmark_pos[1])
-    collision_distance = agent_radius + landmark_radius
-    collision_magnitude = math.sqrt(collision_vector[0]**2 + collision_vector[1]**2)
-
-    # Normalize the collision vector
-    normalized_collision_vector = (collision_vector[0] / collision_magnitude, collision_vector[1] / collision_magnitude)
-
-    # Move the agent away from the landmark along the collision vector
-    new_x = landmark_pos[0] + normalized_collision_vector[0] * collision_distance
-    new_y = landmark_pos[1] + normalized_collision_vector[1] * collision_distance
-    
-    return new_x,new_y
     
 class Agent():
     def __init__(self, pos, size,max_velocity,color,communication_size,num_communication_streams,state_size,goal_size,action_space_size=2,memory_size=32):
@@ -60,7 +36,7 @@ class Agent():
         self.critic = Critic(state_size=state_size,num_objects=9,action_size=action_space_size,hidden_dim=128)
         
         # can be igonred
-        self.simpel_model = Simple_Actor(state_size=state_size,num_objects=9,goal_size=goal_size,hidden_dim=128)
+        #self.simpel_model = Simple_Actor(state_size=state_size,num_objects=9,goal_size=goal_size,hidden_dim=128)
         
         # Define the optimizers
         self.actor_optimizer = optim.Adam(self.model.parameters(), lr=LR)
@@ -70,7 +46,7 @@ class Agent():
     def get_own_state(self,world):
         
         #proposed in paper 
-        damping_factor = 0.5
+        #damping_factor = 0.5
         time_step = 0.1
         x,y = self.pos
         new_x = x + self.velocity * math.cos(self.theta) * time_step

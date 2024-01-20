@@ -8,6 +8,7 @@ import torch.nn.functional as F
 import pickle
 import numpy as np
 import csv
+from utils import check_range,update_file
 
 # Initialize Pygame
 pygame.init()
@@ -25,18 +26,6 @@ SCREEN_HEIGHT = 600
 LANDMARK_RADIUS = 30
 MAX_MEMORY = 10_000
 BATCH_SIZE = 256
-
-# updateing a csv file by append a value
-def update_file(file_path,value):
-    with open (file_path,'a') as f:
-        f.write(str(value) + '\n')
-        
-# return true if [x,y] with radius r touched [other_x,other_y] with radius other_r
-def check_range(x,y,r, other_x,other_y,other_r):
-    distance_to_landmark = math.sqrt((x - other_x)**2 + (y - other_y)**2)
-    combined_radius = r + other_r
-    return int(distance_to_landmark <= combined_radius)
-
 
 class Game:
     def __init__(self,width,height,prey=[],predator=[]): 
@@ -472,50 +461,47 @@ class Game:
             
        
 
+if __name__ == '__main__':
+    # define prey
+    prey1 = Prey(pos = [SCREEN_WIDTH/2,SCREEN_HEIGHT/2],size=15 ,max_velocity=25,color=GREEN,communication_size=32,num_communication_streams=1,state_size=9,goal_size=2)
 
-# define prey
-prey1 = Prey(pos = [SCREEN_WIDTH/2,SCREEN_HEIGHT/2],size=15 ,max_velocity=25,color=GREEN,communication_size=32,num_communication_streams=1,state_size=9,goal_size=2)
+    # define predators
+    predator1 =Predator(pos = [20,20],size=15, max_velocity=15,color=RED,communication_size=32,num_communication_streams=2,state_size=9,goal_size=1)
+    predator2 =Predator(pos = [SCREEN_WIDTH-20,SCREEN_HEIGHT-20],size=15 ,max_velocity=15,color=RED,communication_size=32,num_communication_streams=2,state_size=9,goal_size=1)
 
-# define predators
-predator1 =Predator(pos = [20,20],size=15, max_velocity=15,color=RED,communication_size=32,num_communication_streams=2,state_size=9,goal_size=1)
-predator2 =Predator(pos = [SCREEN_WIDTH-20,SCREEN_HEIGHT-20],size=15 ,max_velocity=15,color=RED,communication_size=32,num_communication_streams=2,state_size=9,goal_size=1)
+    # init state
+    game = Game(SCREEN_WIDTH,SCREEN_HEIGHT)
 
-# init state
-game = Game(SCREEN_WIDTH,SCREEN_HEIGHT)
-
-# inputing agents to the game world
-game.predator=[predator1,predator2]
-game.prey = [prey1]
-game.create_landmarks(seed=42,num_worlds=3,num_landmarks=5)
-game.init_coms()
-game.load_models(predator_name='MADDPG',prey_name='MADDPG')
-
-max_episode_length = 120
-
-# Game loop
-running = True
-clock = pygame.time.Clock()
-
-epochs = 200
-
-for _ in range(epochs):
-    done = 0
+    # inputing agents to the game world
+    game.predator=[predator1,predator2]
+    game.prey = [prey1]
+    game.create_landmarks(seed=42,num_worlds=3,num_landmarks=5)
+    game.init_coms()
     
-    for i in range(max_episode_length):
-        if not done:
-            #game.render()
-            done = game.update()
-       
-            
-    #game.train_critics()
-    #game.train_actors()
-    game.eval(predator_name='MADDPG_test',prey_name='MADDPG_test')
-    game.pick_new_landmark()
-    
-      
-    
-# Quit Pygame
-pygame.quit()
+    game.load_models(predator_name='MADDPG',prey_name='MADDPG')
 
-# Notice
-# After every 50 epochs i need to stop and restart training with loaded models due to a lack of RAM on my PC. Therefore we need to assemble new training data here
+
+    max_episode_length = 120
+    epochs = 200
+
+    for _ in range(epochs):
+        done = 0
+        
+        for _ in range(max_episode_length):
+            if not done:
+                game.render()
+                done = game.update()
+        
+                
+        #game.train_critics()
+        #game.train_actors()
+        #game.eval(predator_name='MADDPG_test',prey_name='MADDPG_test')
+        game.pick_new_landmark()
+        
+        
+        
+    # Quit Pygame
+    pygame.quit()
+
+    # Notice
+    # After every 50 epochs i need to stop and restart training with loaded models due to a lack of RAM on my PC. Therefore we need to assemble new training data here
