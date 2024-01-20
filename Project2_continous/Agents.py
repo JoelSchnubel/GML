@@ -54,13 +54,13 @@ class Agent():
         self.com  = torch.zeros(communication_size,dtype=float) # init private communication vector
 
         # define own model for action, com
-        self.model = Policy_Network(communication_size,num_communication_streams ,state_size,action_space_size, goal_size,memory_size,hidden_size=256) 
+        self.model = Policy_Network(communication_size,num_communication_streams ,state_size,action_space_size, goal_size,memory_size,hidden_size=128) 
         
         # define critic for state,action value
-        self.critic = Critic(state_size=state_size,num_objects=9,action_size=action_space_size,hidden_dim=256)
+        self.critic = Critic(state_size=state_size,num_objects=9,action_size=action_space_size,hidden_dim=128)
         
         # can be igonred
-        self.simpel_model = Simple_Actor(state_size=state_size,num_objects=9,goal_size=goal_size,hidden_dim=256)
+        self.simpel_model = Simple_Actor(state_size=state_size,num_objects=9,goal_size=goal_size,hidden_dim=128)
         
         # Define the optimizers
         self.actor_optimizer = optim.Adam(self.model.parameters(), lr=LR)

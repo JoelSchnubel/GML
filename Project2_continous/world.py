@@ -23,7 +23,7 @@ BLUE = [0,0,255]
 SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 600
 LANDMARK_RADIUS = 30
-MAX_MEMORY = 20_000
+MAX_MEMORY = 10_000
 BATCH_SIZE = 256
 
 # updateing a csv file by append a value
@@ -323,7 +323,7 @@ class Game:
         for i,p in enumerate(self.prey):
             with open("Project2_continous/model/prey"+str(i)+str(prey_name)+".pkl", "rb") as f:
                 prey_model = pickle.load(f)
-            self.predator[i] = predator_model
+            self.prey[i] = prey_model
             
             with open ("Project2_continous/Scores/prey"+str(i)+str(prey_name)+".csv",'r') as f:
                 reader = csv.reader(f)
@@ -488,7 +488,7 @@ game.predator=[predator1,predator2]
 game.prey = [prey1]
 game.create_landmarks(seed=42,num_worlds=3,num_landmarks=5)
 game.init_coms()
-#game.load_models(predator_name='MADDPG',prey_name='MADDPG')
+game.load_models(predator_name='MADDPG',prey_name='MADDPG')
 
 max_episode_length = 120
 
@@ -496,21 +496,20 @@ max_episode_length = 120
 running = True
 clock = pygame.time.Clock()
 
-epochs = 100
+epochs = 200
 
 for _ in range(epochs):
     done = 0
     
- 
     for i in range(max_episode_length):
         if not done:
             #game.render()
             done = game.update()
        
             
-    game.train_critics()
-    game.train_actors()
-    game.eval(predator_name='MADDPG',prey_name='MADDPG')
+    #game.train_critics()
+    #game.train_actors()
+    game.eval(predator_name='MADDPG_test',prey_name='MADDPG_test')
     game.pick_new_landmark()
     
       
@@ -519,4 +518,4 @@ for _ in range(epochs):
 pygame.quit()
 
 # Notice
-# After every 100 steps i need to stop and restart training with loaded models due to a lack of RAM on my PC. Therefore we need to assemble new training data here
+# After every 50 epochs i need to stop and restart training with loaded models due to a lack of RAM on my PC. Therefore we need to assemble new training data here
