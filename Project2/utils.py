@@ -76,7 +76,7 @@ def update_file(file_path,value):
 
 if __name__ == '__main__':    
     
-    # plt everything 
+    # coms vs coms
     plot(['Project2/Scores/predator0MADDPG.csv',
         'Project2/Scores/predator1MADDPG.csv',
         'Project2/Scores/prey0MADDPG.csv'
@@ -101,7 +101,7 @@ if __name__ == '__main__':
         'Project2/Scores/prey0MADDPG_simple_test.csv'
         ],'Testing_simple_vs_simple')
     
-    # coms vs simple[]
+    # coms vs simple
     plot(['Project2/Scores/predator0MADDPG_coms_vs_simple.csv',
         'Project2/Scores/predator1MADDPG_coms_vs_simple.csv',
         'Project2/Scores/prey0MADDPG_coms_vs_simple.csv'

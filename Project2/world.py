@@ -9,7 +9,6 @@ import pickle
 import numpy as np
 import csv
 from utils import check_range,update_file
-import time
 
 # Initialize Pygame
 pygame.init()
@@ -464,10 +463,16 @@ class Game:
 if __name__ == '__main__':
     
     # set to True or False wheater you want to load models or not
-    # name of the models to load can be set further down the code
     load_models = True
     # set to True or False wheater you want to train or test 
     test_mode = True
+    
+    # give the name of the model you want to use
+    model_name = 'MADDPG_coms_vs_coms'
+    
+    # select which model architecture should be used
+    simple_Predator = False
+    simple_Prey = False
     
     max_episode_length = 120
     epochs = 200
@@ -492,7 +497,7 @@ if __name__ == '__main__':
     if load_models:
         # set the name of the models you want to load
         # notice they get additionally assigned a number
-        game.load_models(predator_name='MADDPG_coms_vs_simple',prey_name='MADDPG_coms_vs_simple')
+        game.load_models(predator_name=model_name,prey_name=model_name)
 
     # main Loop 
     for _ in range(epochs):
@@ -501,17 +506,17 @@ if __name__ == '__main__':
         for _ in range(max_episode_length):
             if not done:
                 #game.render()
-                done = game.update(simple_Predator=False,simple_Prey=True)
+                done = game.update(simple_Predator=simple_Predator,simple_Prey=simple_Prey)
         
         if not test_mode:        
-            game.train_critics(simple_predator=False,simple_prey=True)
+            game.train_critics(simple_predator=simple_Predator,simple_prey=simple_Prey)
             game.train_actors()
             # set the names of the models to train
-            game.eval(predator_name='MADDPG_coms_vs_simple',prey_name='MADDPG_coms_vs_simple')
+            game.eval(predator_name=model_name,prey_name=model_name)
         else:     
             # these names are just set for the .csv file to append the values.
             # the test models can be ignored 
-            game.eval(predator_name='MADDPG_coms_vs_simple_test',prey_name='MADDPG_coms_vs_simple_test')
+            game.eval(predator_name=model_name,prey_name=model_name)
         
         game.pick_new_landmark()
         
