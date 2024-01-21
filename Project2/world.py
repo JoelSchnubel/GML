@@ -9,6 +9,7 @@ import pickle
 import numpy as np
 import csv
 from utils import check_range,update_file
+import time
 
 # Initialize Pygame
 pygame.init()
@@ -486,11 +487,12 @@ if __name__ == '__main__':
     game.prey = [prey1]
     game.create_landmarks(seed=42,num_worlds=3,num_landmarks=5)
     game.init_coms()
+    #game.render()
     
     if load_models:
         # set the name of the models you want to load
         # notice they get additionally assigned a number
-        game.load_models(predator_name='MADDPG',prey_name='MADDPG')
+        game.load_models(predator_name='MADDPG_coms_vs_simple',prey_name='MADDPG_coms_vs_simple')
 
     # main Loop 
     for _ in range(epochs):
@@ -498,18 +500,18 @@ if __name__ == '__main__':
         
         for _ in range(max_episode_length):
             if not done:
-                game.render()
-                done = game.update()
+                #game.render()
+                done = game.update(simple_Predator=False,simple_Prey=True)
         
         if not test_mode:        
-            game.train_critics()
+            game.train_critics(simple_predator=False,simple_prey=True)
             game.train_actors()
             # set the names of the models to train
-            game.eval(predator_name='MADDPG',prey_name='MADDPG')
+            game.eval(predator_name='MADDPG_coms_vs_simple',prey_name='MADDPG_coms_vs_simple')
         else:     
             # these names are just set for the .csv file to append the values.
             # the test models can be ignored 
-            game.eval(predator_name='MADDPG_test',prey_name='MADDPG_test')
+            game.eval(predator_name='MADDPG_coms_vs_simple_test',prey_name='MADDPG_coms_vs_simple_test')
         
         game.pick_new_landmark()
         

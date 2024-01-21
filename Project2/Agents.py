@@ -35,8 +35,8 @@ class Agent():
         # define critic for state,action value
         self.critic = Critic(state_size=state_size,num_objects=9,action_size=action_space_size,hidden_dim=128)
         
-        # can be igonred
-        #self.simpel_model = Simple_Actor(state_size=state_size,num_objects=9,goal_size=goal_size,hidden_dim=128)
+        # without coms network
+        self.simpel_model = Simple_Actor(state_size=state_size,num_objects=9,goal_size=goal_size,hidden_dim=128)
         
         # Define the optimizers
         self.actor_optimizer = optim.Adam(self.model.parameters(), lr=LR)
@@ -153,7 +153,7 @@ class Agent():
         else:
             # pred = theta,velocity
             
-            prediction = self.model(physical_observations,goal)
+            prediction = self.simpel_model(physical_observations,goal)
             
             prediction = prediction.detach().numpy()
             

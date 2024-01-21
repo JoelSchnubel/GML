@@ -80,10 +80,35 @@ if __name__ == '__main__':
     plot(['Project2/Scores/predator0MADDPG.csv',
         'Project2/Scores/predator1MADDPG.csv',
         'Project2/Scores/prey0MADDPG.csv'
-        ],'Training')
+        ],'Training_coms_vs_coms')
 
 
     plot(['Project2/Scores/predator0MADDPG_test.csv',
         'Project2/Scores/predator1MADDPG_test.csv',
         'Project2/Scores/prey0MADDPG_test.csv'
-        ],'Testing')
+        ],'Testing_coms_vs_coms')
+    
+        
+    # simple vs simple 
+    plot(['Project2/Scores/predator0MADDPG_simple.csv',
+        'Project2/Scores/predator1MADDPG_simple.csv',
+        'Project2/Scores/prey0MADDPG_simple.csv'
+        ],'Training_simple_vs_simple')
+
+
+    plot(['Project2/Scores/predator0MADDPG_simple_test.csv',
+        'Project2/Scores/predator1MADDPG_simple_test.csv',
+        'Project2/Scores/prey0MADDPG_simple_test.csv'
+        ],'Testing_simple_vs_simple')
+    
+    # coms vs simple[]
+    plot(['Project2/Scores/predator0MADDPG_coms_vs_simple.csv',
+        'Project2/Scores/predator1MADDPG_coms_vs_simple.csv',
+        'Project2/Scores/prey0MADDPG_coms_vs_simple.csv'
+        ],'Training_coms_vs_simple')
+
+
+    plot(['Project2/Scores/predator0MADDPG_coms_vs_simple_test.csv',
+        'Project2/Scores/predator1MADDPG_coms_vs_simple_test.csv',
+        'Project2/Scores/prey0MADDPG_coms_vs_simple_test.csv'
+        ],'Testing_coms_vs_simple')
