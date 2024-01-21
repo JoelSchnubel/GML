@@ -1,239 +1,232 @@
-import torch
 import random
 import numpy as np
 from collections import deque
-from enum import Enum
-from models import Linear_QNet, QTrainer, LSTM_QNET
+from models import Policy_Network ,Critic,Simple_Actor
+import math
+import torch
+import torch.optim as optim
+from utils import normalize_angle ,check_range, adjust_position
 
-MAX_MEMORY = 100_000
-BATCH_SIZE = 128
-LR = 0.015
+# define hyperparameters
+LR = 0.01
+LANDMARK_RADIUS = 30
+SCREEN_WIDTH = 800
+SCREEN_HEIGHT = 600
 
-class Solo_Q_Agent():
-    def __init__(self, pos ,perception_radius):
-        self.pos = pos #[x,y]
-        self.score = 0
-        self.done = False
-        self.perception_radius = perception_radius
-        self.n_games = 0
+    
+class Agent():
+    def __init__(self, pos, size,max_velocity,color,communication_size,num_communication_streams,state_size,goal_size,action_space_size=2,memory_size=32):
+        self.pos = pos
+        self.max_velocity = max_velocity
+        self.color = color
+        self.velocity = 0 # init velocity
+        self.theta = math.pi # init angle
+        self.n_games = 0 # init n_games
+        self.size = size
         self.epsilon = 0 # randomness
-        self.gamma = 0.9 # discount rate
-        self.memory = deque(maxlen=MAX_MEMORY) # popleft()
-        #self.model = Linear_QNet((2*self.perception_radius+1)**2, 256, 4)
-        self.model = LSTM_QNET(3,128,1,4)
-        self.trainer = QTrainer(self.model, lr=LR, gamma=self.gamma)
+        self.scores = []
+        
+        self.goal = torch.zeros(goal_size,dtype=float) # init private goal vector
+        self.com  = torch.zeros(communication_size,dtype=float) # init private communication vector
 
-
-    def remember(self, state, action, reward, next_state,done):
-        self.memory.append((state, action, reward, next_state,done)) # popleft if MAX_MEMORY is reached
+        # define own model for action, com
+        self.model = Policy_Network(communication_size,num_communication_streams ,state_size,action_space_size, goal_size,memory_size,hidden_size=128) 
+        
+        # define critic for state,action value
+        self.critic = Critic(state_size=state_size,num_objects=9,action_size=action_space_size,hidden_dim=128)
+        
+        # can be igonred
+        #self.simpel_model = Simple_Actor(state_size=state_size,num_objects=9,goal_size=goal_size,hidden_dim=128)
+        
+        # Define the optimizers
+        self.actor_optimizer = optim.Adam(self.model.parameters(), lr=LR)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=LR)
+        
     
-    def train_long_memory(self):
-        if len(self.memory) > BATCH_SIZE:
-            mini_sample = random.sample(self.memory, BATCH_SIZE) # list of tuples
-        else:
-            mini_sample = self.memory
-
-        states, actions, rewards, next_states ,dones = zip(*mini_sample)
-        self.trainer.train_step(states, actions, rewards, next_states,dones,True)
-        #for state, action, reward, nexrt_state in mini_sample:
-        #    self.trainer.train_step(state, action, reward, next_state,done)
-
-    def train_short_memory(self, state, action, reward, next_state,done):
-        self.trainer.train_step(state, action, reward, next_state,done,False)
-
-    def get_action(self, state):
-        # random moves: tradeoff exploration / exploitation
+    def get_own_state(self,world):
+        
+        #proposed in paper 
+        #damping_factor = 0.5
+        time_step = 0.1
+        x,y = self.pos
+        new_x = x + self.velocity * math.cos(self.theta) * time_step
+        new_y = y + self.velocity * math.sin(self.theta) * time_step
+        
+        #calculate physical interaction forces
+        
+        #look if next position is in contact with:
+        #[landmark,prey,predator]  0/1
+        l = 0
+        for lm in world.landmarks[world.current]:
+            if not l:
+                l = check_range(new_x,new_y,self.size,lm[0],lm[1],LANDMARK_RADIUS)
+                
+        prey = 0
+        for p in world.prey:
+            if not prey and p is not self:
+                prey = check_range(new_x,new_y,self.size,p.pos[0],p.pos[1],p.size)
+        
+        predator = 0
+        for p in world.predator:
+            if not predator and p is not self:
+                predator = check_range(new_x,new_y,self.size,p.pos[0],p.pos[1],p.size)
+                
+        #alternativly we could calculate the collision forces based on physical interactions or some other way 
+        
+        
+        #Agents observe the relative positions and velocities of the agents, and the positions of the landmarks.
+        state = [new_x,new_y,self.velocity,l,prey,predator]+ self.color #theta = orientation is private  
+        return state
+        
+    def get_x_vector(self,world):
+        
+        # Agents observe the relative positions and velocities of the agents, and the positions of the landmarks.
+        state =[self.get_own_state(world)]
+        
+        x=self.pos[0]
+        y=self.pos[1]
+        
+        # append all predators
+        for p in world.predator:
+            
+            s = p.get_own_state(world)
+            s[0] -= x
+            s[1] -= y
+            
+            state.append(s)
+        
+        # append all prey
+        for p in world.prey:
+            s = p.get_own_state(world)
+            s[0] -= x
+            s[1] -= y
+            
+            state.append(s)
+            
+        # append the landmarks
+        for l in world.landmarks[world.current]:
+            
+            state.append( [l[0]-x,l[1]-y,0,0,0,0,0,0,255])
+        
+        # return state [x_1,...,x_n]
+        return torch.tensor(state,dtype=float)
+    
+    def get_action_communication(self, physical_observations,communication_streams,goal):
+        
+        # define exploration factor
         self.epsilon = 80 - self.n_games
-        final_move = [0,0,0,0]
-        if random.randint(0, 200) < self.epsilon:
-            move = random.randint(0, 3)
-            final_move[move] = 1
+        
+        communication_streams = torch.stack(communication_streams,dim=0)
+
+        # get random angle + velocity
+        if random.randint(0, 200) < self.epsilon+5: # remain at least 5% exploration rate
+            theta = random.uniform(0, 2 * math.pi)
+            velocity = random.uniform(0, self.max_velocity)
+            prediction = [theta,velocity]
+            communication = self.com
+            
+        # get angle + velocity based on the actor model
         else:
-            state0 = torch.tensor(state, dtype=torch.float)
-            prediction = self.model(state0)
-            move = torch.argmax(prediction).item()
-            final_move[move] = 1
+            # pred = theta,velocity
+            prediction , communication = self.model(physical_observations,communication_streams,goal)
+            
+            prediction = prediction.detach().numpy()
+            
+            prediction[0] = normalize_angle(prediction[0]) # make sure angle is in range
+            
+            prediction[1] = max(prediction[1],self.max_velocity) # make sure velocity is not over max 
+ 
+        return prediction , communication
+    
+    
+    # can be ignored
+    def get_simple_action(self, physical_observations,goal):
+        self.epsilon = 80 - self.n_games
+        
+        # get random angle + velocity
+        if random.randint(0, 200) < self.epsilon+5:  # remain at least 5% exploration rate
+            theta = random.uniform(0, 2 * math.pi)
+            velocity = random.uniform(0, self.max_velocity)
+            prediction = [theta,velocity]
+           
+            
+        else:
+            # pred = theta,velocity
+            
+            prediction = self.model(physical_observations,goal)
+            
+            prediction = prediction.detach().numpy()
+            
+            prediction[0] = normalize_angle(prediction[0])#  make sure angle is in range
+            
+            prediction[1] = max(prediction[1],self.max_velocity) # make sure velocity is not over max 
 
-        return final_move
+            
+        return prediction
     
+    #updating position
+    def update_pos(self,theta,velocity,world):
+        # update veolcity and theta
+        self.velocity = velocity
+        self.theta = theta
+        
+        # calculate new position
+        new_x = self.pos[0] + self.velocity * math.cos(self.theta) 
+        new_y = self.pos[1] + self.velocity * math.sin(self.theta) 
+        
+        # make sure pos is in bounds
+        new_x = max(self.size,min(new_x,SCREEN_WIDTH-self.size))
+        new_y = max(self.size,min(new_y,SCREEN_HEIGHT-self.size))
+        
+        # make sure pos dont intersect with a landmark
+        for landmark in world.landmarks[world.current]:
+            if check_range(self.pos[0],self.pos[1],self.size,landmark[0],landmark[1],LANDMARK_RADIUS):
+                new_x,new_y = adjust_position(self.pos,self.size,landmark,LANDMARK_RADIUS)
+        
+        # update pos        
+        self.pos = [new_x,new_y]
+        
     
-    
+        
+class Predator(Agent):
+    def __init__(self,pos, size,max_velocity,color,communication_size,num_communication_streams,state_size,goal_size,action_space_size=2,memory_size=32):
+        super().__init__(pos, size,max_velocity,color,communication_size,num_communication_streams,state_size,goal_size,action_space_size,memory_size)
    
+    # goal vector defines distance to prey
+    def update_goal(self,world):
+        for i, p in enumerate(world.prey):
 
-
-
-class Solo_Q_Agent_Rabbit(Solo_Q_Agent):
-    
-    def __init__(self, pos, perception_radius):
-        super().__init__(pos, perception_radius)
-        
-    def get_lstm_state(self,world):
-        x,y = self.pos
-        state = [[x,y,5]]
-        
-
-        #fox = -100
-        for fox in world.foxes:
-            distance = np.linalg.norm(np.array(self.pos)-np.array(fox.pos))
-            if distance <= self.perception_radius:
-                state.append([fox.pos[0],fox.pos[1],-100])
-        
-        #rabbit = 1
-        for rabbit in world.rabbits:
-            distance = np.linalg.norm(np.array(self.pos)-np.array(rabbit.pos))
-            if distance <= self.perception_radius:
-                state.append([rabbit.pos[0],rabbit.pos[1],1])
+            self.goal[i] = np.linalg.norm(np.array(self.pos) - np.array(p.pos))
             
-        #carrot = 10
-        for carrot in world.carrots:
-            distance = np.linalg.norm(np.array(self.pos)-np.array(carrot))
-            if distance <= self.perception_radius:
-                state.append([carrot[0],carrot[1],10])
+    def get_reward(self,world):
         
-        #rock = -1
-        for rock in world.rocks:
-            distance = np.linalg.norm(np.array(self.pos)-np.array(rock))
-            if distance <= self.perception_radius:
-                state.append([rock[0],rock[1],-1])
+        # check for intersection
+        hit = any(check_range(self.pos[0], self.pos[1], self.size, p.pos[0], p.pos[1], p.size) for p in world.prey)
         
+        # print if catched
+        if hit:
+            print('catched')
         
-        return np.array(state)
+        # calc reward 
+        reward =  -torch.sum(self.goal)/1000 + 10 * hit
         
+        return reward , hit
     
+class Prey(Agent):
+    def __init__(self,pos,size,max_velocity,color,communication_size,num_communication_streams,state_size,goal_size,action_space_size=2,memory_size=32):
+        super().__init__(pos,size,max_velocity,color,communication_size,num_communication_streams,state_size,goal_size,action_space_size,memory_size)
+        
+    # goal vector defines distance to other predators
+    def update_goal(self,world):
+        for i, p in enumerate(world.predator):
+            self.goal[i] = np.linalg.norm(np.array(self.pos) - np.array(p.pos))
     
-    def get_state(self, world):
-        agent_x, agent_y = self.pos
-
-        # Calculate grid size based on perception radius
-        grid_size = 2 * self.perception_radius + 1
-
-        # Initialize the grid
-        self.grid = np.zeros((grid_size, grid_size))
-
-        # Update the grid with the presence of the agent
-        self.grid[self.perception_radius, self.perception_radius] = 5
+    def get_reward(self,world):
         
+        # check for intersection
+        hit = any(check_range(self.pos[0], self.pos[1], self.size, p.pos[0], p.pos[1], p.size) for p in world.predator)
+       
+        # calc reward 
+        reward = torch.sum(self.goal)/1000 - 10 * hit
         
-        rabbits_pos = [rabbit.pos for rabbit in world.rabbits]
-        foxes_pos = [fox.pos for fox in world.foxes]
-
-        # Update the grid with the presence of rocks and carrots within perception_radius
-        for obj_type, obj_list in [('rocks', world.rocks), ('carrots', world.carrots), ('foxes', foxes_pos), ('rabbits', rabbits_pos)]:
-            for obj_x, obj_y in obj_list:
-                rel_x, rel_y = obj_x - agent_x, obj_y - agent_y
-                if abs(rel_x) <= self.perception_radius and abs(rel_y) <= self.perception_radius:
-                    grid_x, grid_y = rel_x + self.perception_radius, rel_y + self.perception_radius
-                    # Ensure the object is within the grid bounds
-                    if 0 <= grid_x < grid_size and 0 <= grid_y < grid_size:
-                        # Mark carrot with 1
-                        if obj_type == 'carrots':
-                            self.grid[grid_y, grid_x] = 1
-                        # Mark rock with -1
-                        elif obj_type == 'rocks' :
-                            self.grid[grid_y, grid_x] = -1
-                        # Mark foxes with -10
-                        elif obj_type == 'foxes':
-                            self.grid[grid_y, grid_x] = -10
-                        # Example: Mark other rabbits with a different value, e.g., -5
-                        elif obj_type == 'rabbits' and (obj_x, obj_y) != (agent_x, agent_y):
-                            self.grid[grid_y, grid_x] = -5
-                            
-        
-        # Mark boundaries with -1
-        for i in range(grid_size):
-            for j in range(grid_size):
-                if (agent_x - self.perception_radius + i) < 0 or (agent_x - self.perception_radius + i) >= world.rows \
-                        or (agent_y - self.perception_radius + j) < 0 or (agent_y - self.perception_radius + j) >= world.columns:
-                    self.grid[j, i] = -1
-
-        # Flatten the grid to create a fixed-size vector
-        state = np.concatenate(self.grid).flatten()
-
-
-        return np.array(state)
-    
-
-class Solo_Q_Agent_Fox(Solo_Q_Agent):
-    
-    def __init__(self, pos, perception_radius):
-        super().__init__(pos, perception_radius)
-        
-    def get_lstm_state(self,world):
-        x,y = self.pos
-        state = [[x,y,5]]
-        
-        #fox = 1
-        for fox in world.foxes:
-            distance = np.linalg.norm(np.array(self.pos)-np.array(fox.pos))
-            if distance <= self.perception_radius:
-                state.append([fox.pos[0],fox.pos[1],1])
-        
-        #rabbit = 100
-        for rabbit in world.rabbits:
-            distance = np.linalg.norm(np.array(self.pos)-np.array(rabbit.pos))
-            if distance <= self.perception_radius:
-                state.append([rabbit.pos[0],rabbit.pos[1],100])
-            
-        #carrot = 0
-        for carrot in world.carrots:
-            distance = np.linalg.norm(np.array(self.pos)-np.array(carrot))
-            if distance <= self.perception_radius:
-                state.append([carrot[0],carrot[1],0])
-        
-        #rock = -1
-        for rock in world.rocks:
-            distance = np.linalg.norm(np.array(self.pos)-np.array(rock))
-            if distance <= self.perception_radius:
-                state.append([rock[0],rock[1],-1])
-        
-        return np.array(state)
-    
-    def get_state(self, world):
-        agent_x, agent_y = self.pos
-
-        # Calculate grid size based on perception radius
-        grid_size = 2 * self.perception_radius + 1
-
-        # Initialize the grid
-        self.grid = np.zeros((grid_size, grid_size))
-
-        # Update the grid with the presence of the agent
-        self.grid[self.perception_radius, self.perception_radius] = 5
-
-        rabbits_pos = [rabbit.pos for rabbit in world.rabbits]
-        foxes_pos = [fox.pos for fox in world.foxes]
-        
-        # Update the grid with the presence of rocks and carrots within perception_radius
-        for obj_type, obj_list in [('rocks', world.rocks), ('carrots', world.carrots), ('foxes', foxes_pos), ('rabbits', rabbits_pos)]:
-            for obj_x, obj_y in obj_list:
-                rel_x, rel_y = obj_x - agent_x, obj_y - agent_y
-                if abs(rel_x) <= self.perception_radius and abs(rel_y) <= self.perception_radius:
-                    grid_x, grid_y = rel_x + self.perception_radius, rel_y + self.perception_radius
-                    # Ensure the object is within the grid bounds
-                    if 0 <= grid_x < grid_size and 0 <= grid_y < grid_size:
-                        # Mark carrot with 1
-                        if obj_type == 'carrots':
-                            self.grid[grid_y, grid_x] = 0
-                        # Mark rock with -1
-                        elif obj_type == 'rocks' :
-                            self.grid[grid_y, grid_x] = -1
-                        # Mark foxes with -10
-                        elif obj_type == 'rabbits':
-                            self.grid[grid_y, grid_x] = 10
-                        # Example: Mark other rabbits with a different value, e.g., -5
-                        elif obj_type == 'foxes' and (obj_x, obj_y) != (agent_x, agent_y):
-                            self.grid[grid_y, grid_x] = -5
-                            
-        
-        # Mark boundaries with -1
-        for i in range(grid_size):
-            for j in range(grid_size):
-                if (agent_x - self.perception_radius + i) < 0 or (agent_x - self.perception_radius + i) >= world.rows \
-                        or (agent_y - self.perception_radius + j) < 0 or (agent_y - self.perception_radius + j) >= world.columns:
-                    self.grid[j, i] = -1
-
-        # Flatten the grid to create a fixed-size vector
-        state = np.concatenate(self.grid).flatten()
-
-        return np.array(state)
-    
+        return reward ,hit

@@ -16,7 +16,7 @@ pygame.init()
 # Define colors
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
-RED =[255,0,0]
+RED = [255,0,0]
 GREEN = [0,255,0]
 BLUE = [0,0,255]
 
@@ -253,9 +253,8 @@ class Game:
             predator_action_loss.backward()
             p.actor_optimizer.step()
             
+            
     # evaluating the models and appending scores to the respectiv .csv file
-    
-    # TODO switch p.n_games for number of turns it took to reach goal
     def eval(self,prey_name='',predator_name=''):
         
         # eval prey agents
@@ -269,11 +268,11 @@ class Game:
                 self.best_prey_score = score
 
                 # store the model
-                with open("Project2_continous/model/prey"+str(i)+str(prey_name)+".pkl", "wb") as f:
+                with open("Project2/model/prey"+str(i)+str(prey_name)+".pkl", "wb") as f:
                     pickle.dump(p, f)
             
             #save the scores
-            update_file(file_path="Project2_continous/Scores/prey"+str(i)+str(prey_name)+".csv",value=score-p.n_games)
+            update_file(file_path="Project2/Scores/prey"+str(i)+str(prey_name)+".csv",value=score-p.n_games)
             
         # eval predator agents
         for i,p in enumerate(self.predator):
@@ -286,11 +285,11 @@ class Game:
                 self.best_predator_score = score
                 
                 # store the model
-                with open("Project2_continous/model/predator"+str(i)+str(predator_name)+".pkl", "wb") as f:
+                with open("Project2/model/predator"+str(i)+str(predator_name)+".pkl", "wb") as f:
                     pickle.dump(p, f)
             
             #save the scores
-            update_file(file_path="Project2_continous/Scores/predator"+str(i)+str(predator_name)+".csv",value=score-p.n_games)
+            update_file(file_path="Project2/Scores/predator"+str(i)+str(predator_name)+".csv",value=score-p.n_games)
         
             
     # Loading models
@@ -298,11 +297,11 @@ class Game:
         print('Loading models ...')
         
         for i,p in enumerate(self.predator):
-            with open("Project2_continous/model/predator"+str(i)+str(predator_name)+".pkl", "rb") as f:
+            with open("Project2/model/predator"+str(i)+str(predator_name)+".pkl", "rb") as f:
                 predator_model = pickle.load(f)
             self.predator[i] = predator_model
             
-            with open ("Project2_continous/Scores/predator"+str(i)+str(predator_name)+".csv",'r') as f:
+            with open ("Project2/Scores/predator"+str(i)+str(predator_name)+".csv",'r') as f:
                 reader = csv.reader(f)
                 values = [float(row[0]) for row in reader]
                 if max(values) > self.best_predator_score:
@@ -310,11 +309,11 @@ class Game:
             p.num_games = len(values)
                     
         for i,p in enumerate(self.prey):
-            with open("Project2_continous/model/prey"+str(i)+str(prey_name)+".pkl", "rb") as f:
+            with open("Project2/model/prey"+str(i)+str(prey_name)+".pkl", "rb") as f:
                 prey_model = pickle.load(f)
             self.prey[i] = prey_model
             
-            with open ("Project2_continous/Scores/prey"+str(i)+str(prey_name)+".csv",'r') as f:
+            with open ("Project2/Scores/prey"+str(i)+str(prey_name)+".csv",'r') as f:
                 reader = csv.reader(f)
                 values = [float(row[0]) for row in reader]
                 if max(values) > self.best_prey_score:
@@ -462,6 +461,16 @@ class Game:
        
 
 if __name__ == '__main__':
+    
+    # set to True or False wheater you want to load models or not
+    # name of the models to load can be set further down the code
+    load_models = True
+    # set to True or False wheater you want to train or test 
+    test_mode = True
+    
+    max_episode_length = 120
+    epochs = 200
+    
     # define prey
     prey1 = Prey(pos = [SCREEN_WIDTH/2,SCREEN_HEIGHT/2],size=15 ,max_velocity=25,color=GREEN,communication_size=32,num_communication_streams=1,state_size=9,goal_size=2)
 
@@ -478,12 +487,12 @@ if __name__ == '__main__':
     game.create_landmarks(seed=42,num_worlds=3,num_landmarks=5)
     game.init_coms()
     
-    game.load_models(predator_name='MADDPG',prey_name='MADDPG')
+    if load_models:
+        # set the name of the models you want to load
+        # notice they get additionally assigned a number
+        game.load_models(predator_name='MADDPG',prey_name='MADDPG')
 
-
-    max_episode_length = 120
-    epochs = 200
-
+    # main Loop 
     for _ in range(epochs):
         done = 0
         
@@ -492,10 +501,16 @@ if __name__ == '__main__':
                 game.render()
                 done = game.update()
         
-                
-        #game.train_critics()
-        #game.train_actors()
-        #game.eval(predator_name='MADDPG_test',prey_name='MADDPG_test')
+        if not test_mode:        
+            game.train_critics()
+            game.train_actors()
+            # set the names of the models to train
+            game.eval(predator_name='MADDPG',prey_name='MADDPG')
+        else:     
+            # these names are just set for the .csv file to append the values.
+            # the test models can be ignored 
+            game.eval(predator_name='MADDPG_test',prey_name='MADDPG_test')
+        
         game.pick_new_landmark()
         
         
@@ -503,5 +518,4 @@ if __name__ == '__main__':
     # Quit Pygame
     pygame.quit()
 
-    # Notice
-    # After every 50 epochs i need to stop and restart training with loaded models due to a lack of RAM on my PC. Therefore we need to assemble new training data here
+  
