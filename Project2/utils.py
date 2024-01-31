@@ -112,3 +112,15 @@ if __name__ == '__main__':
         'Project2/Scores/predator1MADDPG_coms_vs_simple_test.csv',
         'Project2/Scores/prey0MADDPG_coms_vs_simple_test.csv'
         ],'Testing_coms_vs_simple')
+    
+    # simple vs simple GD
+    plot(['Project2/Scores/predator0MADDPG_simple_GD.csv',
+        'Project2/Scores/predator1MADDPG_simple_GD.csv',
+        'Project2/Scores/prey0MADDPG_simple_GD.csv'
+        ],'Training_simple_GD')
+
+
+    plot(['Project2/Scores/predator0MADDPG_simple_GD_test.csv',
+        'Project2/Scores/predator1MADDPG_simple_GD_test.csv',
+        'Project2/Scores/prey0MADDPG_simple_GD_test.csv'
+        ],'Testing_simple_GD')

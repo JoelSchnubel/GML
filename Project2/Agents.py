@@ -15,7 +15,7 @@ SCREEN_HEIGHT = 600
 
     
 class Agent():
-    def __init__(self, pos, size,max_velocity,color,communication_size,num_communication_streams,state_size,goal_size,action_space_size=2,memory_size=32):
+    def __init__(self, pos, size,max_velocity,color,communication_size,num_communication_streams,state_size,goal_size,action_space_size=2,memory_size=32,optimizer='Adam'):
         self.pos = pos
         self.max_velocity = max_velocity
         self.color = color
@@ -38,9 +38,16 @@ class Agent():
         # without coms network
         self.simpel_model = Simple_Actor(state_size=state_size,num_objects=9,goal_size=goal_size,hidden_dim=128)
         
-        # Define the optimizers
-        self.actor_optimizer = optim.Adam(self.model.parameters(), lr=LR)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=LR)
+        if optimizer== 'Adam':
+            # Define the optimizers
+            self.actor_optimizer = optim.Adam(self.model.parameters(), lr=LR)
+            self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=LR)
+        elif optimizer== 'GD':
+            self.actor_optimizer = optim.SGD(self.model.parameters(), lr=LR)
+            self.critic_optimizer = optim.SGD(self.critic.parameters(), lr=LR)        
+        else:
+            raise ValueError(f"Unsupported optimizer: {optim}")
+            
         
     
     def get_own_state(self,world):
@@ -189,8 +196,8 @@ class Agent():
     
         
 class Predator(Agent):
-    def __init__(self,pos, size,max_velocity,color,communication_size,num_communication_streams,state_size,goal_size,action_space_size=2,memory_size=32):
-        super().__init__(pos, size,max_velocity,color,communication_size,num_communication_streams,state_size,goal_size,action_space_size,memory_size)
+    def __init__(self,pos, size,max_velocity,color,communication_size,num_communication_streams,state_size,goal_size,action_space_size=2,memory_size=32,optimizer='adam'):
+        super().__init__(pos, size,max_velocity,color,communication_size,num_communication_streams,state_size,goal_size,action_space_size,memory_size,optimizer)
    
     # goal vector defines distance to prey
     def update_goal(self,world):
@@ -213,8 +220,8 @@ class Predator(Agent):
         return reward , hit
     
 class Prey(Agent):
-    def __init__(self,pos,size,max_velocity,color,communication_size,num_communication_streams,state_size,goal_size,action_space_size=2,memory_size=32):
-        super().__init__(pos,size,max_velocity,color,communication_size,num_communication_streams,state_size,goal_size,action_space_size,memory_size)
+    def __init__(self,pos,size,max_velocity,color,communication_size,num_communication_streams,state_size,goal_size,action_space_size=2,memory_size=32,optimizer='adam'):
+        super().__init__(pos,size,max_velocity,color,communication_size,num_communication_streams,state_size,goal_size,action_space_size,memory_size,optimizer)
         
     # goal vector defines distance to other predators
     def update_goal(self,world):

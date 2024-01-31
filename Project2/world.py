@@ -468,21 +468,22 @@ if __name__ == '__main__':
     test_mode = True
     
     # give the name of the model you want to use
-    model_name = 'MADDPG_coms_vs_coms'
+    model_name = 'MADDPG_simple_GD'
     
     # select which model architecture should be used
-    simple_Predator = False
-    simple_Prey = False
+    simple_Predator = True
+    simple_Prey = True
     
+    # some parameters
     max_episode_length = 120
-    epochs = 200
+    epochs = 500
     
     # define prey
-    prey1 = Prey(pos = [SCREEN_WIDTH/2,SCREEN_HEIGHT/2],size=15 ,max_velocity=25,color=GREEN,communication_size=32,num_communication_streams=1,state_size=9,goal_size=2)
+    prey1 = Prey(pos = [SCREEN_WIDTH/2,SCREEN_HEIGHT/2],size=15 ,max_velocity=25,color=GREEN,communication_size=32,num_communication_streams=1,state_size=9,goal_size=2,optimizer='GD')
 
     # define predators
-    predator1 =Predator(pos = [20,20],size=15, max_velocity=15,color=RED,communication_size=32,num_communication_streams=2,state_size=9,goal_size=1)
-    predator2 =Predator(pos = [SCREEN_WIDTH-20,SCREEN_HEIGHT-20],size=15 ,max_velocity=15,color=RED,communication_size=32,num_communication_streams=2,state_size=9,goal_size=1)
+    predator1 =Predator(pos = [20,20],size=15, max_velocity=15,color=RED,communication_size=32,num_communication_streams=2,state_size=9,goal_size=1,optimizer='GD')
+    predator2 =Predator(pos = [SCREEN_WIDTH-20,SCREEN_HEIGHT-20],size=15 ,max_velocity=15,color=RED,communication_size=32,num_communication_streams=2,state_size=9,goal_size=1,optimizer='GD')
 
     # init state
     game = Game(SCREEN_WIDTH,SCREEN_HEIGHT)
@@ -516,7 +517,7 @@ if __name__ == '__main__':
         else:     
             # these names are just set for the .csv file to append the values.
             # the test models can be ignored 
-            game.eval(predator_name=model_name,prey_name=model_name)
+            game.eval(predator_name=model_name+'_test',prey_name=model_name+'_test')
         
         game.pick_new_landmark()
         

@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import os
 import torch.distributions as dists
 
-
+ 
 # Simple Neural Network  without coms
 class Simple_Actor(nn.Module):
     def __init__(self, state_size,num_objects, goal_size, hidden_dim):
