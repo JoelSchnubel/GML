@@ -124,3 +124,27 @@ if __name__ == '__main__':
         'Project2/Scores/predator1MADDPG_simple_GD_test.csv',
         'Project2/Scores/prey0MADDPG_simple_GD_test.csv'
         ],'Testing_simple_GD')
+    
+    # simple Adam vs GD
+    plot(['Project2/Scores/predator0MADDPG_simple_adam_vs_GD.csv',
+        'Project2/Scores/predator1MADDPG_simple_adam_vs_GD.csv',
+        'Project2/Scores/prey0MADDPG_simple_adam_vs_GD.csv'
+        ],'Training_simple_adam_vs_GD')
+
+
+    plot(['Project2/Scores/predator0MADDPG_simple_adam_vs_GD_test.csv',
+        'Project2/Scores/predator1MADDPG_simple_adam_vs_GD_test.csv',
+        'Project2/Scores/prey0MADDPG_simple_adam_vs_GD_test.csv'
+        ],'Testing_simple_adam_vs_GD')
+    
+    # simple GD vs adam
+    plot(['Project2/Scores/predator0MADDPG_simple_GD_vs_adam.csv',
+        'Project2/Scores/predator1MADDPG_simple_GD_vs_adam.csv',
+        'Project2/Scores/prey0MADDPG_simple_GD_vs_adam.csv'
+        ],'Training_simple_GD_vs_adam')
+
+
+    plot(['Project2/Scores/predator0MADDPG_simple_GD_vs_adam_test.csv',
+        'Project2/Scores/predator1MADDPG_simple_GD_vs_adam_test.csv',
+        'Project2/Scores/prey0MADDPG_simple_GD_vs_adam_test.csv'
+        ],'Testing_simple_GD_vs_adam')

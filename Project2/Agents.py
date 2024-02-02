@@ -46,7 +46,7 @@ class Agent():
             self.actor_optimizer = optim.SGD(self.model.parameters(), lr=LR)
             self.critic_optimizer = optim.SGD(self.critic.parameters(), lr=LR)        
         else:
-            raise ValueError(f"Unsupported optimizer: {optim}")
+            raise ValueError(f"Unsupported optimizer: {optimizer}")
             
         
     

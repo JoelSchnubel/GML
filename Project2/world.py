@@ -468,7 +468,7 @@ if __name__ == '__main__':
     test_mode = True
     
     # give the name of the model you want to use
-    model_name = 'MADDPG_simple_GD'
+    model_name = 'MADDPG_simple_GD_vs_adam'
     
     # select which model architecture should be used
     simple_Predator = True
@@ -479,7 +479,7 @@ if __name__ == '__main__':
     epochs = 500
     
     # define prey
-    prey1 = Prey(pos = [SCREEN_WIDTH/2,SCREEN_HEIGHT/2],size=15 ,max_velocity=25,color=GREEN,communication_size=32,num_communication_streams=1,state_size=9,goal_size=2,optimizer='GD')
+    prey1 = Prey(pos = [SCREEN_WIDTH/2,SCREEN_HEIGHT/2],size=15 ,max_velocity=25,color=GREEN,communication_size=32,num_communication_streams=1,state_size=9,goal_size=2,optimizer='Adam')
 
     # define predators
     predator1 =Predator(pos = [20,20],size=15, max_velocity=15,color=RED,communication_size=32,num_communication_streams=2,state_size=9,goal_size=1,optimizer='GD')
